@@ -216,7 +216,7 @@ const MovieDetails = () => {
                   </div>
                 ) : (
                   <Link 
-                    to={`/bookings/${movie._id}`}
+                    to={`/book/${movie._id}`}
                     className="w-full btn-primary flex items-center justify-center gap-2"
                   >
                     <Ticket className="w-5 h-5" />

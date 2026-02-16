@@ -11,10 +11,19 @@ const bookingSchema = new mongoose.Schema({
     ref: 'Movie',
     required: [true, 'Movie is required']
   },
+  theatre: {
+    type: String,
+    required: [true, 'Theatre is required'],
+    trim: true
+  },
+  bookingDate: {
+    type: Date,
+    required: [true, 'Booking date is required']
+  },
   showTime: {
     type: String,
     required: [true, 'Show time is required'],
-    enum: ['morning', 'afternoon', 'evening', 'night']
+    trim: true
   },
   seats: {
     type: [String],
@@ -40,7 +49,7 @@ const bookingSchema = new mongoose.Schema({
   timestamps: true
 });
 
-// Add indexes for better query performance
+// Indexes for better performance
 bookingSchema.index({ user: 1, movie: 1 });
 bookingSchema.index({ bookingStatus: 1 });
 

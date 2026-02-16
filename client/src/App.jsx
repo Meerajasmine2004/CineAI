@@ -14,15 +14,11 @@ import ProfilePage from "./pages/ProfilePage";
 import Movies from "./pages/Movies";
 import MovieDetails from "./pages/MovieDetails";
 import ComingSoon from "./pages/ComingSoon";
+import MyBookings from "./pages/MyBookings";
+import SeatSelection from "./pages/SeatSelection";
 import ProtectedRoute from "./routes/ProtectedRoute";
 
 // Placeholder pages
-const BookingsPage = () => (
-  <div className="min-h-screen bg-dark-950 pt-24 px-4">
-    <h1 className="text-white text-3xl">My Bookings - Coming Soon</h1>
-  </div>
-);
-
 const SearchPage = () => (
   <div className="min-h-screen bg-dark-950 pt-24 px-4">
     <h1 className="text-white text-3xl">Search Results - Coming Soon</h1>
@@ -72,13 +68,22 @@ function App() {
 
                 <Route path="/movies" element={<Movies />} />
                 <Route path="/movies/:id" element={<MovieDetails />} />
+                <Route path="/book/:id" element={
+                  <ProtectedRoute>
+                    <SeatSelection />
+                  </ProtectedRoute>
+                } />
                 <Route path="/coming-soon" element={<ComingSoon />} />
                 <Route path="/profile" element={
                   <ProtectedRoute>
                     <ProfilePage />
                   </ProtectedRoute>
                 } />
-                <Route path="/bookings" element={<BookingsPage />} />
+                <Route path="/bookings" element={
+                  <ProtectedRoute>
+                    <MyBookings />
+                  </ProtectedRoute>
+                } />
                 <Route path="/search" element={<SearchPage />} />
 
                 {/* 404 */}
