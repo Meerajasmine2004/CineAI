@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Calendar, Clock, Users, DollarSign, Film, ArrowLeft, Ticket, Check } from 'lucide-react';
+import { io } from 'socket.io-client';
 import api from '../services/api';
 import toast from 'react-hot-toast';
 
@@ -17,6 +18,8 @@ const SeatSelection = () => {
   const [bookingDate, setBookingDate] = useState('');
   const [selectedDay, setSelectedDay] = useState('');
   const [bookedSeats, setBookedSeats] = useState([]);
+  const [lockedSeats, setLockedSeats] = useState({});
+  const [socket, setSocket] = useState(null);
   const [showTimes] = useState([
     '10:00 AM',
     '1:00 PM', 
@@ -37,14 +40,65 @@ const SeatSelection = () => {
   const seatsPerRow = 14;
 
   useEffect(() => {
+    // Connect to Socket.io server
+    const newSocket = io("http://localhost:5000");
+    setSocket(newSocket);
+
+    // Listen for seat locked events
+    newSocket.on("seatLocked", ({ seat, lockedBy }) => {
+      setLockedSeats(prev => ({
+        ...prev,
+        [seat]: lockedBy
+      }));
+      console.log(`Seat ${seat} locked by ${lockedBy}`);
+    });
+
+    // Listen for seat unlocked events
+    newSocket.on("seatUnlocked", ({ seat }) => {
+      setLockedSeats(prev => {
+        const updated = { ...prev };
+        delete updated[seat];
+        return updated;
+      });
+      console.log(`Seat ${seat} unlocked`);
+    });
+
+    // Listen for seat already locked events
+    newSocket.on("seatAlreadyLocked", ({ movieId, showTime, seat }) => {
+      if (movieId === id && showTime === selectedShowTime) {
+        toast.error(`Seat ${seat} is already being selected by another user`);
+      }
+    });
+
+    // Cleanup on unmount
+    return () => {
+      newSocket.off("seatLocked");
+      newSocket.off("seatUnlocked");
+      newSocket.off("seatAlreadyLocked");
+      
+      // Unlock all locked seats by this user
+      Object.keys(lockedSeats).forEach((seat) => {
+        if (lockedSeats[seat] === newSocket.id) {
+          newSocket.emit("unlockSeat", {
+            movieId: id,
+            showTime: selectedShowTime,
+            seat: seat
+          });
+        }
+      });
+      newSocket.disconnect();
+    };
+  }, [id, selectedShowTime]);
+
+  useEffect(() => {
     fetchMovieDetails();
   }, [id]);
 
   useEffect(() => {
-    if (movie && selectedTheatre && bookingDate && selectedShowTime) {
+    if (id && selectedShowTime && bookingDate) {
       fetchBookedSeats();
     }
-  }, [movie, selectedTheatre, bookingDate, selectedShowTime]);
+  }, [id, selectedShowTime, bookingDate]);
 
   const fetchMovieDetails = async () => {
     try {
@@ -67,27 +121,62 @@ const SeatSelection = () => {
   };
 
   const fetchBookedSeats = async () => {
-    try {
-      const res = await api.get(
-        `/bookings/occupied?movieId=${id}&theatre=${selectedTheatre}&date=${bookingDate}&showTime=${selectedShowTime}` 
-      );
-      setBookedSeats(res.data.data);
-    } catch (error) {
-      console.error("Fetch booked seats error", error);
+  try {
+    const response = await api.get("/bookings/seats", {
+      params: {
+        movieId,
+        showTime,
+        bookingDate
+      }
+    });
+
+    if (response.data.success) {
+      setBookedSeats(response.data.bookedSeats);
     }
+  } catch (error) {
+    console.error("Failed to fetch booked seats");
+  }
+};
+
+  const handleSeatClick = (seat) => {
+    // Block booked seat
+    if (bookedSeats.includes(seat)) {
+      toast.error("Seat already booked");
+      return;
+    }
+
+    // Block if locked by other user
+    if (lockedSeats[seat] && lockedSeats[seat] !== socket.id) {
+      toast.error("Seat is currently locked by another user");
+      return;
+    }
+
+    // If already selected → unselect
+    if (selectedSeats.includes(seat)) {
+      setSelectedSeats(prev => prev.filter(s => s !== seat));
+      socket.emit("unlockSeat", { movieId: id, showTime: selectedShowTime, seat });
+      return;
+    }
+
+    // Otherwise select
+    setSelectedSeats(prev => [...prev, seat]);
+    socket.emit("lockSeat", { movieId: id, showTime: selectedShowTime, seat });
   };
 
   const toggleSeat = (row, seatNumber) => {
     const seatId = `${row}${seatNumber}`;
     
-    // Prevent selection of booked seats
-    if (bookedSeats.includes(seatId)) {
-      return;
-    }
-    
     if (selectedSeats.includes(seatId)) {
+      // Unlock seat
+      if (socket) {
+        socket.emit("unlockSeat", { movieId: id, showTime: selectedShowTime, seat: seatId });
+      }
       setSelectedSeats(selectedSeats.filter(seat => seat !== seatId));
     } else {
+      // Try to lock seat
+      if (socket) {
+        socket.emit("lockSeat", { movieId: id, showTime: selectedShowTime, seat: seatId });
+      }
       setSelectedSeats([...selectedSeats, seatId]);
     }
   };
@@ -133,20 +222,30 @@ const SeatSelection = () => {
   };
 
   const getSeatClass = (seat, row) => {
-    if (bookedSeats.includes(seat))
-      return "bg-red-500 text-white cursor-not-allowed opacity-70";
-
-    if (selectedSeats.includes(seat))
-      return "bg-green-500 text-white";
-
+    // 1. If bookedSeats.includes(seat)
+    if (bookedSeats.includes(seat)) {
+      return "bg-red-600 text-white cursor-not-allowed border-red-600";
+    }
+    
+    // 2. Else if lockedSeats[seat] && lockedSeats[seat] !== socket.id
+    if (lockedSeats[seat] && lockedSeats[seat] !== socket.id) {
+      return "bg-yellow-500 text-black cursor-not-allowed border-yellow-500";
+    }
+    
+    // 3. Else if selectedSeats.includes(seat)
+    if (selectedSeats.includes(seat)) {
+      return "bg-green-600 text-white border-green-600";
+    }
+    
+    // 4. Else: base seat style
     if (["A","B","C"].includes(row))
-      return "bg-transparent border-2 border-gray-400 text-gray-300";
+      return "border border-gray-500 text-gray-300 bg-transparent hover:bg-gray-700";
 
-    if (["D","E","F"].includes(row))
-      return "bg-transparent border-2 border-blue-500 text-blue-400";
+    if (["D","E"].includes(row))
+      return "border border-blue-500 text-blue-400 bg-transparent hover:bg-blue-700";
 
-    if (["G","H","I","J"].includes(row))
-      return "bg-transparent border-2 border-yellow-400 text-yellow-300";
+    if (["F","G","H","I","J"].includes(row))
+      return "border border-yellow-500 text-yellow-400 bg-transparent hover:bg-yellow-700";
   };
 
   const confirmBooking = async () => {
@@ -173,26 +272,33 @@ const SeatSelection = () => {
     try {
       setBookingLoading(true);
       
-      const bookingData = {
-        movie,
+      // Unlock all locked seats before booking
+      if (socket) {
+        selectedSeats.forEach(seat => {
+          socket.emit("unlockSeat", { movieId: id, showTime: selectedShowTime, seat });
+        });
+      }
+
+      const response = await api.post('/bookings', {
+        movie: id,
         theatre: selectedTheatre,
-        bookingDate,
-        showTime: selectedShowTime.toLowerCase().replace(' ', '_'),
+        bookingDate: bookingDate,
+        showTime: selectedShowTime,
         seats: selectedSeats,
         totalPrice: calculateTotalPrice()
-      };
+      });
 
-      const response = await api.post('/bookings', bookingData);
-      
       if (response.data.success) {
-        toast.success('Booking confirmed successfully!');
+        toast.success('Booking confirmed!');
+        setSelectedSeats([]);
+        fetchBookedSeats();
         navigate('/bookings');
       } else {
-        toast.error('Failed to create booking');
+        toast.error(response.data.error || 'Booking failed');
       }
-    } catch (err) {
+    } catch (error) {
       toast.error('Booking failed. Please try again.');
-      console.error('Booking error:', err);
+      console.error('Booking error:', error);
     } finally {
       setBookingLoading(false);
     }
@@ -412,17 +518,15 @@ const SeatSelection = () => {
                     <span className="text-dark-400 font-medium w-4">{row}</span>
                     {Array.from({ length: seatsPerRow }, (_, index) => {
                       const seatNumber = index + 1;
-                      const seatId = `${row}${seatNumber}`;
-                      const isSelected = selectedSeats.includes(seatId);
-                      const isBooked = bookedSeats.includes(seatId);
+                      const seat = `${row}${seatNumber}`;
                       const aisleGap = seatNumber === 8 ? 'ml-6' : '';
                       
                       return (
                         <button
-                          key={seatId}
-                          onClick={() => !isBooked && toggleSeat(row, seatNumber)}
-                          disabled={isBooked}
-                          className={`w-10 h-10 rounded-md flex items-center justify-center text-sm font-semibold transition ${getSeatClass(seatId, row)} ${aisleGap}`}
+                          key={seat}
+                          onClick={() => handleSeatClick(seat)}
+                          disabled={bookedSeats.includes(seat)}
+                          className={`w-10 h-10 rounded-md flex items-center justify-center text-sm font-semibold transition ${getSeatClass(seat, row)} ${bookedSeats.includes(seat) ? 'cursor-not-allowed opacity-70' : ''} ${aisleGap}`}
                         >
                           {seatNumber}
                         </button>
@@ -435,23 +539,27 @@ const SeatSelection = () => {
               {/* Legend */}
               <div className="flex items-center justify-center gap-6 mt-8 flex-wrap">
                 <div className="flex items-center gap-2">
-                  <div className="w-6 h-6 bg-transparent border-2 border-gray-400 rounded-md"></div>
+                  <div className="w-6 h-6 border border-gray-500 text-gray-300 bg-transparent rounded-md"></div>
                   <span className="text-dark-300 text-sm">Normal (A-C)</span>
                 </div>
                 <div className="flex items-center gap-2">
-                  <div className="w-6 h-6 bg-transparent border-2 border-blue-500 rounded-md"></div>
-                  <span className="text-dark-300 text-sm">Premium (D-F)</span>
+                  <div className="w-6 h-6 border border-blue-500 text-blue-400 bg-transparent rounded-md"></div>
+                  <span className="text-dark-300 text-sm">Premium (D-E)</span>
                 </div>
                 <div className="flex items-center gap-2">
-                  <div className="w-6 h-6 bg-transparent border-2 border-yellow-400 rounded-md"></div>
-                  <span className="text-dark-300 text-sm">VIP (G-J)</span>
+                  <div className="w-6 h-6 border border-yellow-500 text-yellow-400 bg-transparent rounded-md"></div>
+                  <span className="text-dark-300 text-sm">VIP (F-J)</span>
                 </div>
                 <div className="flex items-center gap-2">
-                  <div className="w-6 h-6 bg-green-500 border-2 border-green-500 rounded-md"></div>
+                  <div className="w-6 h-6 bg-green-600 text-white border-green-600 rounded-md"></div>
                   <span className="text-dark-300 text-sm">Selected</span>
                 </div>
                 <div className="flex items-center gap-2">
-                  <div className="w-6 h-6 bg-red-500 border-2 border-red-500 rounded-md opacity-70"></div>
+                  <div className="w-6 h-6 bg-yellow-500 text-black border-yellow-500 rounded-md"></div>
+                  <span className="text-dark-300 text-sm">Locked</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-6 h-6 bg-red-600 text-white border-red-600 rounded-md"></div>
                   <span className="text-dark-300 text-sm">Booked</span>
                 </div>
               </div>

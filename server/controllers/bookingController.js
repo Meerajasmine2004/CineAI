@@ -1,5 +1,7 @@
+import express from 'express';
 import Booking from '../models/Booking.js';
 import Movie from '../models/Movie.js';
+import { seatLocks, io } from '../server.js';
 
 // Create a new booking
 export const createBooking = async (req, res) => {
@@ -186,16 +188,54 @@ export const getOccupiedSeats = async (req, res) => {
       return seats.concat(booking.seats);
     }, []);
 
+    // Add currently locked seats from memory store
+    const lockedSeats = [];
+    Object.keys(seatLocks).forEach(lockKey => {
+      const [keyMovieId, keyShowTime, seat] = lockKey.split('_');
+      if (keyMovieId === movieId && keyShowTime === showTime) {
+        lockedSeats.push(seat);
+      }
+    });
+
+    // Combine booked and locked seats
+    const allOccupiedSeats = [...occupiedSeats, ...lockedSeats];
+
     res.status(200).json({
       success: true,
-      data: occupiedSeats
+      data: allOccupiedSeats
     });
 
   } catch (error) {
     console.error("Get occupied seats error:", error);
     res.status(500).json({
       success: false,
-      error: "Server error"
+      error: "Failed to fetch occupied seats"
+    });
+  }
+};
+
+export const getBookedSeats = async (req, res) => {
+  try {
+    const { movieId, showTime, bookingDate } = req.query;
+
+    const bookings = await Booking.find({
+      movie: movieId,
+      showTime,
+      bookingDate: new Date(bookingDate),
+      bookingStatus: "confirmed"
+    });
+
+    const bookedSeats = bookings.flatMap(b => b.seats);
+
+    res.status(200).json({
+      success: true,
+      bookedSeats
+    });
+
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: "Failed to fetch booked seats"
     });
   }
 };

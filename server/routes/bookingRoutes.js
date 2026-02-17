@@ -1,5 +1,5 @@
 import express from 'express';
-import { createBooking, getMyBookings, getBookingById, cancelBooking, getOccupiedSeats } from '../controllers/bookingController.js';
+import { createBooking, getMyBookings, getBookingById, cancelBooking, getOccupiedSeats, getBookedSeats } from '../controllers/bookingController.js';
 import { protect } from '../middleware/authMiddleware.js';
 
 const router = express.Router();
@@ -15,6 +15,9 @@ router.get('/:id', protect, getBookingById);
 
 // Get occupied seats for a specific show
 router.get('/occupied', getOccupiedSeats);
+
+// Get permanently booked seats
+router.get('/seats', protect, getBookedSeats);
 
 // Cancel booking
 router.delete('/:id', protect, cancelBooking);
