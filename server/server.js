@@ -12,6 +12,7 @@ import authRoutes from './routes/authRoutes.js';
 import userRoutes from './routes/userRoutes.js';
 import movieRoutes from './routes/movieRoutes.js';
 import bookingRoutes from './routes/bookingRoutes.js';
+import recommendationRoutes from './routes/recommendation.js';
 
 // Load environment variables
 dotenv.config();
@@ -127,6 +128,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/movies', movieRoutes);
 app.use('/api/bookings', bookingRoutes);
+app.use('/api/recommendations', recommendationRoutes);
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {

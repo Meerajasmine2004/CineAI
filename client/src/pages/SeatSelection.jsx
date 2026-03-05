@@ -70,11 +70,47 @@ const SeatSelection = () => {
       }
     });
 
+    // Listen for seat booked events
+    newSocket.on("seatBooked", ({ seats, movieId, theatre, showTime, bookingDate }) => {
+
+      const bookedDateOnly = bookingDate.split("T")[0];
+
+      if (
+        movieId === id &&
+        theatre === selectedTheatre &&
+        showTime === selectedShowTime &&
+        bookedDateOnly === bookingDate
+      ) {
+        setBookedSeats(prev => [...new Set([...prev, ...seats])]);
+      }
+
+    });
+
+    // Listen for seat cancelled events
+    newSocket.on("seatCancelled", ({ seats, movieId, theatre, showTime, bookingDate }) => {
+
+      const cancelledDateOnly = bookingDate.split("T")[0];
+
+      if (
+        movieId === id &&
+        theatre === selectedTheatre &&
+        showTime === selectedShowTime &&
+        cancelledDateOnly === bookingDate
+      ) {
+        setBookedSeats(prev =>
+          prev.filter(seat => !seats.includes(seat))
+        );
+      }
+
+    });
+
     // Cleanup on unmount
     return () => {
       newSocket.off("seatLocked");
       newSocket.off("seatUnlocked");
       newSocket.off("seatAlreadyLocked");
+      newSocket.off("seatBooked");
+      newSocket.off("seatCancelled");
       
       // Unlock all locked seats by this user
       Object.keys(lockedSeats).forEach((seat) => {
@@ -100,6 +136,43 @@ const SeatSelection = () => {
     }
   }, [id, selectedShowTime, bookingDate]);
 
+  useEffect(() => {
+    if (selectedShowTime)
+      localStorage.setItem("selectedShowTime", selectedShowTime);
+  }, [selectedShowTime]);
+
+  useEffect(() => {
+    if (selectedTheatre)
+      localStorage.setItem("selectedTheatre", selectedTheatre);
+  }, [selectedTheatre]);
+
+  useEffect(() => {
+    if (bookingDate)
+      localStorage.setItem("bookingDate", bookingDate);
+  }, [bookingDate]);
+
+  useEffect(() => {
+    const savedTime = localStorage.getItem("selectedShowTime");
+    const savedTheatre = localStorage.getItem("selectedTheatre");
+    const savedDate = localStorage.getItem("bookingDate");
+
+    if (savedTime) setSelectedShowTime(savedTime);
+    if (savedTheatre) setSelectedTheatre(savedTheatre);
+
+    if (savedDate) {
+      setBookingDate(savedDate);
+
+      const formattedDay = new Date(savedDate).toLocaleDateString('en-IN', {
+        weekday: 'long',
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric'
+      });
+
+      setSelectedDay(formattedDay);
+    }
+  }, []);
+
   const fetchMovieDetails = async () => {
     try {
       setLoading(true);
@@ -122,19 +195,29 @@ const SeatSelection = () => {
 
   const fetchBookedSeats = async () => {
   try {
+    if (!id || !selectedShowTime || !bookingDate) return;
+
     const response = await api.get("/bookings/seats", {
       params: {
-        movieId,
-        showTime,
-        bookingDate
+        movieId: id,
+        theatre: selectedTheatre,
+        showTime: selectedShowTime,
+        bookingDate: bookingDate
       }
     });
 
     if (response.data.success) {
-      setBookedSeats(response.data.bookedSeats);
+      // Support both possible backend shapes
+      const seats =
+        response.data.bookedSeats ||
+        response.data.data ||
+        [];
+
+      setBookedSeats(seats);
     }
+
   } catch (error) {
-    console.error("Failed to fetch booked seats");
+    console.error("Failed to fetch booked seats", error);
   }
 };
 
@@ -224,17 +307,17 @@ const SeatSelection = () => {
   const getSeatClass = (seat, row) => {
     // 1. If bookedSeats.includes(seat)
     if (bookedSeats.includes(seat)) {
-      return "bg-red-600 text-white cursor-not-allowed border-red-600";
+      return "bg-red-600 text-white cursor-not-allowed";
     }
     
     // 2. Else if lockedSeats[seat] && lockedSeats[seat] !== socket.id
     if (lockedSeats[seat] && lockedSeats[seat] !== socket.id) {
-      return "bg-yellow-500 text-black cursor-not-allowed border-yellow-500";
+      return "bg-yellow-500 text-black";
     }
     
     // 3. Else if selectedSeats.includes(seat)
     if (selectedSeats.includes(seat)) {
-      return "bg-green-600 text-white border-green-600";
+      return "bg-green-600 text-white";
     }
     
     // 4. Else: base seat style
@@ -292,12 +375,20 @@ const SeatSelection = () => {
         toast.success('Booking confirmed!');
         setSelectedSeats([]);
         fetchBookedSeats();
+        
+        // Trigger event to refresh recommendations
+        window.dispatchEvent(new Event("bookingCompleted"));
+        
         navigate('/bookings');
       } else {
         toast.error(response.data.error || 'Booking failed');
       }
     } catch (error) {
-      toast.error('Booking failed. Please try again.');
+      if (error.response?.data?.error) {
+        toast.error(error.response.data.error);
+      } else {
+        toast.error("Booking failed. Please try again.");
+      }
       console.error('Booking error:', error);
     } finally {
       setBookingLoading(false);

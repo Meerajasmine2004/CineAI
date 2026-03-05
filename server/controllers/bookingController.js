@@ -1,7 +1,7 @@
 import express from 'express';
 import Booking from '../models/Booking.js';
 import Movie from '../models/Movie.js';
-import { seatLocks, io } from '../server.js';
+import { io } from '../server.js';
 
 // Create a new booking
 export const createBooking = async (req, res) => {
@@ -40,6 +40,27 @@ export const createBooking = async (req, res) => {
       }
     });
 
+    // Check for double booking conflicts
+    const existingBookings = await Booking.find({
+      movie,
+      showTime,
+      bookingDate: new Date(bookingDate),
+      bookingStatus: "confirmed"
+    });
+
+    const alreadyBookedSeats = existingBookings.flatMap(b => b.seats);
+
+    const conflictSeats = seats.filter(seat =>
+      alreadyBookedSeats.includes(seat)
+    );
+
+    if (conflictSeats.length > 0) {
+      return res.status(400).json({
+        success: false,
+        error: `Seats already booked: ${conflictSeats.join(", ")}`
+      });
+    }
+
     // Create booking
     const booking = new Booking({
       user: req.user._id,
@@ -54,12 +75,22 @@ export const createBooking = async (req, res) => {
 
     await booking.save();
 
-    await booking.populate('movie');
+try {
+  io.emit("seatBooked", {
+    seats,
+    movieId: movie,
+    theatre,
+    showTime,
+    bookingDate
+  });
+} catch (err) {
+  console.error("Socket emit error:", err);
+}
 
     res.status(201).json({
       success: true,
       data: booking,
-      message: 'Booking created successfully'
+      message: "Booking created successfully"
     });
 
   } catch (error) {
@@ -155,6 +186,14 @@ export const cancelBooking = async (req, res) => {
 
     await Booking.findByIdAndDelete(id);
 
+    io.emit("seatCancelled", {
+      seats: booking.seats,
+      movie: booking.movie.toString(),
+      theatre: booking.theatre,
+      showTime: booking.showTime,
+      bookingDate: booking.bookingDate
+    });
+
     res.status(200).json({
       success: true,
       message: "Booking deleted successfully"
@@ -216,11 +255,19 @@ export const getOccupiedSeats = async (req, res) => {
 
 export const getBookedSeats = async (req, res) => {
   try {
-    const { movieId, showTime, bookingDate } = req.query;
+    const { movieId, theatre, showTime, bookingDate } = req.query;
+
+    if (!movieId || !theatre || !showTime || !bookingDate) {
+      return res.status(400).json({
+        success: false,
+        error: "Missing required parameters"
+      });
+    }
 
     const bookings = await Booking.find({
       movie: movieId,
-      showTime,
+      theatre: theatre,
+      showTime: showTime,
       bookingDate: new Date(bookingDate),
       bookingStatus: "confirmed"
     });

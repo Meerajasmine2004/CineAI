@@ -166,7 +166,7 @@ const MovieDetails = () => {
                 <div>
                   <h3 className="text-lg font-semibold text-white mb-2">Genres</h3>
                   <div className="flex flex-wrap gap-2">
-                    {movie.genre.map((g, index) => (
+                    {(movie.genre || []).map((g, index) => (
                       <span 
                         key={index}
                         className="px-3 py-1 bg-dark-800 text-dark-300 rounded-full text-sm font-medium"
@@ -182,7 +182,7 @@ const MovieDetails = () => {
                   <h3 className="text-lg font-semibold text-white mb-2">Languages</h3>
                   <div className="flex items-center gap-2">
                     <Globe className="w-4 h-4 text-cinema-500" />
-                    <span className="text-dark-300">{movie.language.join(', ')}</span>
+                    <span className="text-dark-300">{movie.language?.join(', ') || "Unknown Language"}</span>
                   </div>
                 </div>
 

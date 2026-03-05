@@ -151,14 +151,14 @@ const Movies = () => {
                 <div className="space-y-3">
                   {/* Genres */}
                   <div className="flex flex-wrap gap-2">
-                    {movie.genre.map((g, index) => (
+                    {movie.genre?.map((g, index) => (
                       <span 
                         key={index}
                         className="px-3 py-1 bg-dark-800 text-dark-300 rounded-full text-xs font-medium"
                       >
                         {g}
                       </span>
-                    ))}
+                    )) || <span className="px-3 py-1 bg-dark-800 text-dark-300 rounded-full text-xs font-medium">Unknown Genre</span>}
                   </div>
 
                   {/* Duration, Language, Release Date */}
@@ -173,7 +173,7 @@ const Movies = () => {
                       {/* Languages */}
                       <div className="flex items-center gap-1">
                         <Globe className="w-4 h-4" />
-                        <span>{movie.language.join(', ')}</span>
+                        <span>{movie.language?.join(', ') || 'Unknown Language'}</span>
                       </div>
                     </div>
                     

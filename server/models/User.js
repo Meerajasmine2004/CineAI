@@ -42,7 +42,13 @@ const userSchema = new mongoose.Schema({
       enum: ['morning', 'evening', 'night'],
       default: 'evening'
     }
-  }
+  },
+  preferredGenres: [{
+    type: String
+  }],
+  preferredLanguages: [{
+    type: String
+  }]
 }, {
   timestamps: true
 });

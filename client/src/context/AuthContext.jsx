@@ -131,6 +131,9 @@ export const AuthProvider = ({ children }) => {
       // Store token
       localStorage.setItem('token', token);
       
+      // Store user object for RecommendedMovies component
+      localStorage.setItem('user', JSON.stringify(user));
+      
       // Update state
       dispatch({
         type: AUTH_SUCCESS,
@@ -151,6 +154,7 @@ export const AuthProvider = ({ children }) => {
   // Logout user
   const logout = () => {
     localStorage.removeItem('token');
+    localStorage.removeItem('user');
     dispatch({
       type: LOGOUT
     });

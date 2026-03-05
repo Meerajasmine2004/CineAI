@@ -20,10 +20,10 @@ const movieSchema = new mongoose.Schema({
     type: String,
     required: [true, 'At least one genre is required']
   }],
-  language: [{
+  language: {
     type: String,
-    required: [true, 'At least one language is required']
-  }],
+    required: [true, 'Language is required']
+  },
   duration: {
     type: Number,
     required: [true, 'Movie duration is required'],
