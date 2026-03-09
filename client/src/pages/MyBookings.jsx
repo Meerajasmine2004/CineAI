@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { Calendar, Clock, Users, Film, Ticket, ArrowRight, Trash2 } from 'lucide-react';
+import { Calendar, Clock, Users, Film, Ticket, ArrowRight, Trash2, MapPin } from 'lucide-react';
 import api from '../services/api';
 
 const MyBookings = () => {
@@ -150,6 +150,11 @@ const MyBookings = () => {
                 <div className="flex items-center gap-2 text-dark-300">
                   <Clock className="w-4 h-4 text-cinema-500" />
                   {formatShowTime(booking.showTime)}
+                </div>
+
+                <div className="flex items-center gap-2 text-gray-300">
+                  <MapPin className="w-4 h-4 text-red-500" />
+                  <span>Theatre: {booking.theatre}</span>
                 </div>
 
                 <div className="flex items-center gap-2 text-dark-300">

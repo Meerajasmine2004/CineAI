@@ -20,6 +20,8 @@ const SeatSelection = () => {
   const [bookedSeats, setBookedSeats] = useState([]);
   const [lockedSeats, setLockedSeats] = useState({});
   const [socket, setSocket] = useState(null);
+  const [aiTheatre, setAiTheatre] = useState(null);
+  const [recommendedSeats, setRecommendedSeats] = useState([]);
   const [showTimes] = useState([
     '10:00 AM',
     '1:00 PM', 
@@ -30,8 +32,6 @@ const SeatSelection = () => {
   const [theatres] = useState([
     'PVR Phoenix',
     'INOX Marina Mall',
-    'AGS Villivakkam',
-    'Luxe Cinemas',
     'SPI Palazzo'
   ]);
 
@@ -39,12 +39,11 @@ const SeatSelection = () => {
   const rows = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J'];
   const seatsPerRow = 14;
 
+  // Socket connection useEffect
   useEffect(() => {
-    // Connect to Socket.io server
     const newSocket = io("http://localhost:5000");
     setSocket(newSocket);
 
-    // Listen for seat locked events
     newSocket.on("seatLocked", ({ seat, lockedBy }) => {
       setLockedSeats(prev => ({
         ...prev,
@@ -53,7 +52,6 @@ const SeatSelection = () => {
       console.log(`Seat ${seat} locked by ${lockedBy}`);
     });
 
-    // Listen for seat unlocked events
     newSocket.on("seatUnlocked", ({ seat }) => {
       setLockedSeats(prev => {
         const updated = { ...prev };
@@ -63,16 +61,13 @@ const SeatSelection = () => {
       console.log(`Seat ${seat} unlocked`);
     });
 
-    // Listen for seat already locked events
     newSocket.on("seatAlreadyLocked", ({ movieId, showTime, seat }) => {
       if (movieId === id && showTime === selectedShowTime) {
         toast.error(`Seat ${seat} is already being selected by another user`);
       }
     });
 
-    // Listen for seat booked events
     newSocket.on("seatBooked", ({ seats, movieId, theatre, showTime, bookingDate }) => {
-
       const bookedDateOnly = bookingDate.split("T")[0];
 
       if (
@@ -83,12 +78,9 @@ const SeatSelection = () => {
       ) {
         setBookedSeats(prev => [...new Set([...prev, ...seats])]);
       }
-
     });
 
-    // Listen for seat cancelled events
     newSocket.on("seatCancelled", ({ seats, movieId, theatre, showTime, bookingDate }) => {
-
       const cancelledDateOnly = bookingDate.split("T")[0];
 
       if (
@@ -101,10 +93,8 @@ const SeatSelection = () => {
           prev.filter(seat => !seats.includes(seat))
         );
       }
-
     });
 
-    // Cleanup on unmount
     return () => {
       newSocket.off("seatLocked");
       newSocket.off("seatUnlocked");
@@ -112,7 +102,6 @@ const SeatSelection = () => {
       newSocket.off("seatBooked");
       newSocket.off("seatCancelled");
       
-      // Unlock all locked seats by this user
       Object.keys(lockedSeats).forEach((seat) => {
         if (lockedSeats[seat] === newSocket.id) {
           newSocket.emit("unlockSeat", {
@@ -126,31 +115,48 @@ const SeatSelection = () => {
     };
   }, [id, selectedShowTime]);
 
+  // Movie details fetch
   useEffect(() => {
     fetchMovieDetails();
   }, [id]);
 
+  // AI theatre fetch
+  useEffect(() => {
+    const fetchAiTheatre = async () => {
+      try {
+        const response = await api.get(`/recommendations/theatre/${id}`);
+        
+        if (response.data.success) {
+          setAiTheatre(response.data.data?.theatre);
+        }
+      } catch (err) {
+        console.error('Error fetching AI theatre:', err);
+      }
+    };
+
+    fetchAiTheatre();
+  }, [id]);
+
+  // Booked seats fetch
   useEffect(() => {
     if (id && selectedShowTime && bookingDate) {
       fetchBookedSeats();
     }
   }, [id, selectedShowTime, bookingDate]);
 
+  // LocalStorage management
   useEffect(() => {
     if (selectedShowTime)
       localStorage.setItem("selectedShowTime", selectedShowTime);
-  }, [selectedShowTime]);
 
-  useEffect(() => {
     if (selectedTheatre)
       localStorage.setItem("selectedTheatre", selectedTheatre);
-  }, [selectedTheatre]);
 
-  useEffect(() => {
     if (bookingDate)
       localStorage.setItem("bookingDate", bookingDate);
-  }, [bookingDate]);
+  }, [selectedShowTime, selectedTheatre, bookingDate]);
 
+  // Load saved values on mount
   useEffect(() => {
     const savedTime = localStorage.getItem("selectedShowTime");
     const savedTheatre = localStorage.getItem("selectedTheatre");
@@ -193,97 +199,106 @@ const SeatSelection = () => {
     }
   };
 
-  const fetchBookedSeats = async () => {
-  try {
-    if (!id || !selectedShowTime || !bookingDate) return;
+  const fetchRecommendedSeats = async () => {
+    console.log("Suggest Best Seats clicked");
 
-    const response = await api.get("/bookings/seats", {
-      params: {
-        movieId: id,
-        theatre: selectedTheatre,
-        showTime: selectedShowTime,
-        bookingDate: bookingDate
-      }
-    });
-
-    if (response.data.success) {
-      // Support both possible backend shapes
-      const seats =
-        response.data.bookedSeats ||
-        response.data.data ||
-        [];
-
-      setBookedSeats(seats);
+    if (!selectedTheatre || !selectedShowTime) {
+      toast.error("Select theatre and show time first");
+      return;
     }
 
-  } catch (error) {
-    console.error("Failed to fetch booked seats", error);
-  }
-};
+    try {
+      const response = await api.get("/recommendations/seats", {
+        params: {
+          movieId: id,
+          theatre: selectedTheatre,
+          showTime: selectedShowTime
+        }
+      });
+
+      console.log("Seat API response:", response.data);
+
+      if (response.data.success) {
+        setRecommendedSeats(response.data.data);
+      }
+
+    } catch (error) {
+      console.error("Seat recommendation API error:", error);
+    }
+  };
+
+  const fetchBookedSeats = async () => {
+    try {
+      if (!id || !selectedShowTime || !bookingDate) return;
+
+      const response = await api.get("/bookings/seats", {
+        params: {
+          movieId: id,
+          theatre: selectedTheatre,
+          showTime: selectedShowTime
+        }
+      });
+
+      if (response.data.success) {
+        const seats =
+          response.data.bookedSeats ||
+          response.data.data ||
+          [];
+
+        setBookedSeats(seats);
+      }
+
+    } catch (error) {
+      console.error("Failed to fetch booked seats", error);
+    }
+  };
 
   const handleSeatClick = (seat) => {
-    // Block booked seat
     if (bookedSeats.includes(seat)) {
       toast.error("Seat already booked");
       return;
     }
 
-    // Block if locked by other user
-    if (lockedSeats[seat] && lockedSeats[seat] !== socket.id) {
+    if (socket && lockedSeats[seat] && lockedSeats[seat] !== socket.id) {
       toast.error("Seat is currently locked by another user");
       return;
     }
 
-    // If already selected → unselect
     if (selectedSeats.includes(seat)) {
       setSelectedSeats(prev => prev.filter(s => s !== seat));
-      socket.emit("unlockSeat", { movieId: id, showTime: selectedShowTime, seat });
-      return;
-    }
-
-    // Otherwise select
-    setSelectedSeats(prev => [...prev, seat]);
-    socket.emit("lockSeat", { movieId: id, showTime: selectedShowTime, seat });
-  };
-
-  const toggleSeat = (row, seatNumber) => {
-    const seatId = `${row}${seatNumber}`;
-    
-    if (selectedSeats.includes(seatId)) {
-      // Unlock seat
       if (socket) {
-        socket.emit("unlockSeat", { movieId: id, showTime: selectedShowTime, seat: seatId });
+        socket.emit("unlockSeat", { movieId: id, showTime: selectedShowTime, seat });
       }
-      setSelectedSeats(selectedSeats.filter(seat => seat !== seatId));
     } else {
-      // Try to lock seat
+      setSelectedSeats(prev => [...prev, seat]);
       if (socket) {
-        socket.emit("lockSeat", { movieId: id, showTime: selectedShowTime, seat: seatId });
+        socket.emit("lockSeat", { movieId: id, showTime: selectedShowTime, seat });
       }
-      setSelectedSeats([...selectedSeats, seatId]);
     }
-  };
-
-  const handleShowTimeChange = (e) => {
-    setSelectedShowTime(e.target.value);
   };
 
   const handleTheatreChange = (e) => {
-    setSelectedTheatre(e.target.value);
+    const theatre = e.target.value;
+    setSelectedTheatre(theatre);
+  };
+
+  const handleShowTimeChange = (e) => {
+    const showTime = e.target.value;
+    setSelectedShowTime(showTime);
   };
 
   const handleDateChange = (e) => {
     const date = e.target.value;
     setBookingDate(date);
-    
-    // Format and set selected day
-    const day = new Date(date).toLocaleDateString('en-IN', {
+
+    const formattedDay = new Date(date).toLocaleDateString('en-IN', {
       weekday: 'long',
       day: 'numeric',
       month: 'short',
       year: 'numeric'
     });
-    setSelectedDay(day);
+
+    setSelectedDay(formattedDay);
   };
 
   const calculateTotalPrice = () => {
@@ -305,30 +320,25 @@ const SeatSelection = () => {
   };
 
   const getSeatClass = (seat, row) => {
-    // 1. If bookedSeats.includes(seat)
     if (bookedSeats.includes(seat)) {
       return "bg-red-600 text-white cursor-not-allowed";
     }
     
-    // 2. Else if lockedSeats[seat] && lockedSeats[seat] !== socket.id
-    if (lockedSeats[seat] && lockedSeats[seat] !== socket.id) {
+    if (socket && lockedSeats[seat] && lockedSeats[seat] !== socket.id) {
       return "bg-yellow-500 text-black";
     }
     
-    // 3. Else if selectedSeats.includes(seat)
     if (selectedSeats.includes(seat)) {
       return "bg-green-600 text-white";
     }
     
-    // 4. Else: base seat style
     if (["A","B","C"].includes(row))
       return "border border-gray-500 text-gray-300 bg-transparent hover:bg-gray-700";
 
-    if (["D","E"].includes(row))
-      return "border border-blue-500 text-blue-400 bg-transparent hover:bg-blue-700";
+    if (["D","E","F"].includes(row))
+      return "border border-blue-500 text-blue-300 bg-transparent hover:bg-blue-700";
 
-    if (["F","G","H","I","J"].includes(row))
-      return "border border-yellow-500 text-yellow-400 bg-transparent hover:bg-yellow-700";
+    return "border border-yellow-400 text-yellow-300 bg-transparent hover:bg-yellow-700";
   };
 
   const confirmBooking = async () => {
@@ -337,91 +347,59 @@ const SeatSelection = () => {
       return;
     }
 
-    if (!selectedShowTime) {
-      toast.error('Please select a show time');
-      return;
-    }
-
-    if (!selectedTheatre) {
-      toast.error('Please select a theatre');
-      return;
-    }
-
-    if (!bookingDate) {
-      toast.error('Please select a booking date');
+    if (!selectedShowTime || !selectedTheatre || !bookingDate) {
+      toast.error('Please select show time, theatre, and date');
       return;
     }
 
     try {
       setBookingLoading(true);
       
-      // Unlock all locked seats before booking
-      if (socket) {
-        selectedSeats.forEach(seat => {
-          socket.emit("unlockSeat", { movieId: id, showTime: selectedShowTime, seat });
-        });
-      }
-
       const response = await api.post('/bookings', {
         movie: id,
         theatre: selectedTheatre,
         bookingDate: bookingDate,
         showTime: selectedShowTime,
-        seats: selectedSeats,
-        totalPrice: calculateTotalPrice()
+        seats: selectedSeats
       });
 
       if (response.data.success) {
         toast.success('Booking confirmed!');
         setSelectedSeats([]);
-        fetchBookedSeats();
         
-        // Trigger event to refresh recommendations
-        window.dispatchEvent(new Event("bookingCompleted"));
-        
-        navigate('/bookings');
+        setTimeout(() => {
+          navigate('/my-bookings');
+        }, 2000);
       } else {
         toast.error(response.data.error || 'Booking failed');
       }
     } catch (error) {
-      if (error.response?.data?.error) {
-        toast.error(error.response.data.error);
-      } else {
-        toast.error("Booking failed. Please try again.");
-      }
-      console.error('Booking error:', error);
+      toast.error('Booking failed. Please try again.');
     } finally {
       setBookingLoading(false);
     }
   };
 
-  const handleImageError = (e) => {
-    e.target.src = 'https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?w=500&h=750&fit=crop&auto=format&dpr=2';
-  };
-
   if (loading) {
     return (
-      <div className="min-h-screen bg-dark-950 pt-24 px-4 pb-12 flex items-center justify-center">
-        <div className="flex flex-col items-center space-y-4">
-          <div className="w-16 h-16 border-4 border-cinema-600 border-t-transparent rounded-full animate-spin"></div>
-          <p className="text-white text-lg">Loading movie details...</p>
-        </div>
+      <div className="min-h-screen bg-dark-900 flex items-center justify-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-white"></div>
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="min-h-screen bg-dark-950 pt-24 px-4 pb-12 flex items-center justify-center">
+      <div className="min-h-screen bg-dark-900 flex items-center justify-center">
         <div className="text-center">
-          <Film className="w-16 h-16 text-dark-400 mx-auto mb-4" />
-          <h2 className="text-2xl font-bold text-white mb-2">Oops! Something went wrong</h2>
+          <Film className="w-16 h-16 mx-auto mb-4 text-red-500" />
+          <h2 className="text-2xl font-bold text-white mb-4">Error</h2>
           <p className="text-dark-300 mb-6">{error}</p>
-          <button 
-            onClick={() => navigate('/movies')}
-            className="btn-primary inline-flex items-center gap-2"
+          <button
+            onClick={() => navigate('/')}
+            className="btn-primary"
           >
-            <ArrowLeft className="w-4 h-4" />
+            <ArrowLeft className="w-4 h-4 mr-2" />
             Back to Movies
           </button>
         </div>
@@ -431,144 +409,154 @@ const SeatSelection = () => {
 
   if (!movie) {
     return (
-      <div className="min-h-screen bg-dark-950 pt-24 px-4 pb-12 flex items-center justify-center">
-        <div className="text-center">
-          <Film className="w-16 h-16 text-dark-400 mx-auto mb-4" />
-          <h2 className="text-2xl font-bold text-white mb-2">Movie Not Found</h2>
-          <p className="text-dark-300 mb-6">The movie you're looking for doesn't exist.</p>
-          <button 
-            onClick={() => navigate('/movies')}
-            className="btn-primary inline-flex items-center gap-2"
-          >
-            <ArrowLeft className="w-4 h-4" />
-            Back to Movies
-          </button>
-        </div>
+      <div className="min-h-screen bg-dark-900 flex items-center justify-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-white"></div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-dark-950 pt-24 px-4 pb-12">
-      {/* Header */}
-      <div className="max-w-7xl mx-auto mb-8">
-        <div className="flex items-center gap-4 mb-6">
-          <button 
-            onClick={() => navigate(`/movies/${id}`)}
-            className="text-cinema-500 hover:text-cinema-400 transition-colors duration-200 inline-flex items-center gap-2"
-          >
-            <ArrowLeft className="w-5 h-5" />
-            Back to Movie
-          </button>
-        </div>
-        
-        <div className="flex flex-col lg:flex-row gap-8">
-          {/* Movie Info */}
-          <div className="lg:w-1/3">
+    <div className="min-h-screen bg-dark-900 text-white py-8">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <button
+          onClick={() => navigate('/')}
+          className="mb-8 flex items-center text-gray-400 hover:text-white transition"
+        >
+          <ArrowLeft className="w-5 h-5 mr-2" />
+          Back to Movie Details
+        </button>
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          <div className="lg:col-span-1">
             <div className="glass rounded-xl p-6 border border-dark-800">
-              <div className="flex gap-4 mb-4">
-                <img 
-                  src={movie.poster}
-                  alt={movie.title}
-                  className="w-24 h-36 object-cover rounded-lg"
-                  onError={handleImageError}
-                />
-                <div>
-                  <h1 className="text-2xl font-bold text-white mb-2">{movie.title}</h1>
-                  <div className="flex items-center gap-2 text-sm text-dark-400">
-                    <Calendar className="w-4 h-4" />
-                    <span>{movie.genre.join(', ')}</span>
+              <h2 className="text-xl font-bold text-white mb-6">Booking Details</h2>
+              
+              <div className="space-y-4">
+                <div className="flex items-center gap-2">
+                  <Calendar className="w-5 h-5 text-cinema-400" />
+                  <div>
+                    <p className="text-sm text-dark-400">Selected Date</p>
+                    <p className="text-white font-medium">
+                      {selectedDay || 'Not selected'}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <Clock className="w-5 h-5 text-cinema-400" />
+                  <div>
+                    <p className="text-sm text-dark-400">Show Time</p>
+                    <p className="text-white font-medium">
+                      {selectedShowTime || 'Not selected'}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <Users className="w-5 h-5 text-cinema-400" />
+                  <div>
+                    <p className="text-sm text-dark-400">Theatre</p>
+                    <p className="text-white font-medium">
+                      {selectedTheatre || 'Not selected'}
+                      {aiTheatre === selectedTheatre && (
+                        <span className="ml-2 text-yellow-300">✨</span>
+                      )}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Ticket className="w-5 h-5 text-cinema-400" />
+                    <div>
+                      <p className="text-sm text-dark-400">Booking Date</p>
+                      <p className="text-white font-medium">
+                        {bookingDate || 'Not selected'}
+                      </p>
+                    </div>
                   </div>
                 </div>
               </div>
 
-              {/* Date Selection */}
-              <div className="mb-6">
-                <label className="block text-sm font-medium text-white mb-2">Select Booking Date</label>
-                <input 
-                  type="date"
-                  value={bookingDate}
-                  onChange={handleDateChange}
-                  min={new Date().toISOString().split('T')[0]}
-                  className="w-full bg-dark-800 border border-dark-600 rounded-lg px-4 py-3 text-white"
-                />
-                {selectedDay && (
-                  <div className="mt-2 text-sm text-cinema-400">
-                    Selected: {selectedDay}
-                  </div>
-                )}
-              </div>
-
-              {/* Theatre Selection */}
-              <div className="mb-6">
-                <label className="block text-sm font-medium text-white mb-2">Select Theatre</label>
-                <select 
-                  value={selectedTheatre}
-                  onChange={handleTheatreChange}
-                  className="w-full px-4 py-2 bg-dark-800 border border-dark-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-cinema-500"
-                >
-                  <option value="">Choose a theatre...</option>
-                  {theatres.map((theatre) => (
-                    <option key={theatre} value={theatre}>{theatre}</option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Show Time Selection */}
-              <div className="mb-6">
-                <label className="block text-sm font-medium text-white mb-2">Select Show Time</label>
-                <select 
-                  value={selectedShowTime}
-                  onChange={handleShowTimeChange}
-                  className="w-full px-4 py-2 bg-dark-800 border border-dark-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-cinema-500"
-                >
-                  <option value="">Choose a time...</option>
-                  {showTimes.map((time) => (
-                    <option key={time} value={time}>{time}</option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Booking Summary */}
               <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-dark-300">Booking Date:</span>
-                  <span className="text-white font-medium">
-                    {bookingDate || 'Not selected'}
-                  </span>
+                <div className="mb-6">
+                  <label className="block text-sm font-medium text-white mb-2">Select Booking Date</label>
+                  <input
+                    type="date"
+                    value={bookingDate}
+                    onChange={handleDateChange}
+                    min={new Date().toISOString().split('T')[0]}
+                    className="w-full bg-dark-800 border border-dark-600 rounded-lg px-4 py-3 text-white"
+                  />
+                  {selectedDay && (
+                    <div className="mt-2 text-sm text-cinema-400">
+                      Selected: {selectedDay}
+                    </div>
+                  )}
                 </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-dark-300">Theatre:</span>
-                  <span className="text-white font-medium">
-                    {selectedTheatre || 'Not selected'}
-                  </span>
+
+                <div className="mb-6">
+                  <label className="block text-sm font-medium text-white mb-2">Select Theatre</label>
+                  <select 
+                    value={selectedTheatre}
+                    onChange={handleTheatreChange}
+                    className="w-full px-4 py-2 bg-dark-800 border border-dark-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-cinema-500"
+                  >
+                    <option value="">Choose a theatre...</option>
+                    {theatres.map((theatre) => (
+                      <option key={theatre} value={theatre}>
+                        {theatre}
+                        {aiTheatre === theatre && (
+                          <span className="ml-2 text-yellow-300">✨</span>
+                        )}
+                      </option>
+                    ))}
+                  </select>
                 </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-dark-300">Show Time:</span>
-                  <span className="text-white font-medium">
-                    {selectedShowTime || 'Not selected'}
-                  </span>
+
+                <div className="mb-6">
+                  <label className="block text-sm font-medium text-white mb-2">Select Show Time</label>
+                  <select 
+                    value={selectedShowTime}
+                    onChange={handleShowTimeChange}
+                    className="w-full px-4 py-2 bg-dark-800 border border-dark-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-cinema-500"
+                  >
+                    <option value="">Choose a time...</option>
+                    {showTimes.map((time) => (
+                      <option key={time} value={time}>{time}</option>
+                    ))}
+                  </select>
                 </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-dark-300">Selected Seats:</span>
-                  <span className="text-white font-medium">
-                    {selectedSeats.length > 0 ? selectedSeats.join(', ') : 'None'}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between text-lg font-bold">
-                  <span className="text-white">Total Price:</span>
-                  <span className="text-cinema-500">₹{calculateTotalPrice()}</span>
+
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <DollarSign className="w-5 h-5 text-cinema-400" />
+                      <div>
+                        <p className="text-sm text-dark-400">Total Price</p>
+                        <p className="text-white font-medium">₹{calculateTotalPrice()}</p>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Users className="w-5 h-5 text-cinema-400" />
+                    <div>
+                      <p className="text-sm text-dark-400">Seats Selected</p>
+                        <p className="text-white font-medium">
+                          {selectedSeats.length > 0 ? selectedSeats.join(', ') : 'None'}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
           </div>
 
-          {/* Seat Selection */}
-          <div className="lg:w-2/3">
+          <div className="lg:col-span-2">
             <div className="glass rounded-xl p-6 border border-dark-800">
               <h2 className="text-xl font-bold text-white mb-6">Select Your Seats</h2>
               
-              {/* Pricing Legend */}
               <div className="mb-6 p-4 bg-dark-900 rounded-lg">
                 <h3 className="text-sm font-semibold text-white mb-3">Pricing Categories</h3>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -595,8 +583,15 @@ const SeatSelection = () => {
                   </div>
                 </div>
               </div>
+
+              {/* AI Seat Recommendation Button */}
+              <button
+                onClick={fetchRecommendedSeats}
+                className="bg-purple-600 text-white px-4 py-2 rounded mb-4 flex items-center gap-2 hover:bg-purple-700 transition"
+              >
+                ✨ Suggest Best Seats
+              </button>
               
-              {/* Screen */}
               <div className="mb-8">
                 <div className="bg-dark-700 h-2 rounded-full mb-2"></div>
                 <p className="text-center text-dark-400 text-sm mb-6">SCREEN</p>
@@ -608,18 +603,22 @@ const SeatSelection = () => {
                   <div key={row} className="flex items-center gap-2 justify-center">
                     <span className="text-dark-400 font-medium w-4">{row}</span>
                     {Array.from({ length: seatsPerRow }, (_, index) => {
-                      const seatNumber = index + 1;
-                      const seat = `${row}${seatNumber}`;
-                      const aisleGap = seatNumber === 8 ? 'ml-6' : '';
+                      const number = index + 1;
+                      const seatId = `${row}${number}`;
+                      const isRecommended = recommendedSeats.includes(seatId);
+                      const aisleGap = number === 8 ? 'ml-6' : '';
                       
                       return (
                         <button
-                          key={seat}
-                          onClick={() => handleSeatClick(seat)}
-                          disabled={bookedSeats.includes(seat)}
-                          className={`w-10 h-10 rounded-md flex items-center justify-center text-sm font-semibold transition ${getSeatClass(seat, row)} ${bookedSeats.includes(seat) ? 'cursor-not-allowed opacity-70' : ''} ${aisleGap}`}
+                          key={seatId}
+                          onClick={() => handleSeatClick(seatId)}
+                          disabled={bookedSeats.includes(seatId)}
+                          className={`seat w-10 h-10 rounded-md flex items-center justify-center text-sm font-semibold transition relative ${getSeatClass(seatId, row)} ${isRecommended ? "bg-purple-500 border-purple-300 text-white" : ""} ${bookedSeats.includes(seatId) ? 'cursor-not-allowed opacity-70' : ''} ${aisleGap}`}
                         >
-                          {seatNumber}
+                          {number}
+                          {recommendedSeats.includes(seatId) && (
+                            <span className="absolute top-0 right-0 text-yellow-300 text-xs">✨</span>
+                          )}
                         </button>
                       );
                     })}
@@ -627,31 +626,18 @@ const SeatSelection = () => {
                 ))}
               </div>
 
-              {/* Legend */}
               <div className="flex items-center justify-center gap-6 mt-8 flex-wrap">
-                <div className="flex items-center gap-2">
-                  <div className="w-6 h-6 border border-gray-500 text-gray-300 bg-transparent rounded-md"></div>
-                  <span className="text-dark-300 text-sm">Normal (A-C)</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="w-6 h-6 border border-blue-500 text-blue-400 bg-transparent rounded-md"></div>
-                  <span className="text-dark-300 text-sm">Premium (D-E)</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="w-6 h-6 border border-yellow-500 text-yellow-400 bg-transparent rounded-md"></div>
-                  <span className="text-dark-300 text-sm">VIP (F-J)</span>
-                </div>
                 <div className="flex items-center gap-2">
                   <div className="w-6 h-6 bg-green-600 text-white border-green-600 rounded-md"></div>
                   <span className="text-dark-300 text-sm">Selected</span>
                 </div>
                 <div className="flex items-center gap-2">
-                  <div className="w-6 h-6 bg-yellow-500 text-black border-yellow-500 rounded-md"></div>
-                  <span className="text-dark-300 text-sm">Locked</span>
-                </div>
-                <div className="flex items-center gap-2">
                   <div className="w-6 h-6 bg-red-600 text-white border-red-600 rounded-md"></div>
                   <span className="text-dark-300 text-sm">Booked</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-6 h-6 bg-yellow-500 text-black border-yellow-600 rounded-md"></div>
+                  <span className="text-dark-300 text-sm">Locked</span>
                 </div>
               </div>
             </div>

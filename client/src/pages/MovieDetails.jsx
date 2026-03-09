@@ -9,9 +9,26 @@ const MovieDetails = () => {
   const [movie, setMovie] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [aiTheatre, setAiTheatre] = useState(null);
 
   useEffect(() => {
     fetchMovieDetails();
+  }, [id]);
+
+  useEffect(() => {
+    const fetchAiTheatre = async () => {
+      try {
+        const response = await api.get(`/recommendations/theatre/${id}`);
+        
+        if (response.data.success) {
+          setAiTheatre(response.data.data?.theatre);
+        }
+      } catch (err) {
+        console.error('Error fetching AI theatre:', err);
+      }
+    };
+
+    fetchAiTheatre();
   }, [id]);
 
   const fetchMovieDetails = async () => {
@@ -203,6 +220,19 @@ const MovieDetails = () => {
                     <span className="text-dark-300">{formatDate(movie.releaseDate)}</span>
                   </div>
                 </div>
+
+                {/* Recommended Theatre */}
+                {aiTheatre && (
+                  <div>
+                    <h3 className="text-lg font-semibold text-white mb-2">Recommended Theatre</h3>
+                    <div className="flex items-center gap-2 bg-dark-800 rounded-lg px-3 py-2">
+                      <span className="text-white">{aiTheatre}</span>
+                      <span className="ml-2 text-xs bg-green-600 text-white px-2 py-1 rounded">
+                        AI Pick
+                      </span>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Action Button */}

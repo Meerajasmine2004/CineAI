@@ -1,5 +1,5 @@
 import express from 'express';
-import { getRecommendations, getBecauseYouWatched } from '../services/recommendationService.js';
+import { getRecommendations, getBecauseYouWatched, getRecommendedTheatres, getRecommendedTheatre, getRecommendedSeats } from '../services/recommendationService.js';
 
 const router = express.Router();
 
@@ -63,6 +63,50 @@ router.get('/because-you-watched/:userId', async (req, res) => {
     res.status(500).json({
       success: false,
       error: 'Failed to generate "Because You Watched" recommendations'
+    });
+  }
+});
+
+// GET /api/recommendations/theatres/:movieId
+router.get("/theatres/:movieId", async (req, res) => {
+  const theatres = await getRecommendedTheatres(req.params.movieId);
+
+  res.json({
+    success: true,
+    data: theatres
+  });
+});
+
+// GET /api/recommendations/theatre/:movieId
+router.get("/theatre/:movieId", async (req, res) => {
+  const theatre = await getRecommendedTheatre(req.params.movieId);
+
+  res.json({
+    success: true,
+    data: theatre
+  });
+});
+
+// GET /api/recommendations/seats
+router.get("/seats", async (req, res) => {
+  try {
+    const { movieId, theatre, showTime } = req.query;
+
+    console.log("Seat recommendation request:", movieId, theatre, showTime);
+
+    const seats = await getRecommendedSeats(movieId, theatre, showTime);
+
+    res.json({
+      success: true,
+      data: seats
+    });
+
+  } catch (error) {
+    console.error("Seat recommendation error:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to generate seat recommendations"
     });
   }
 });

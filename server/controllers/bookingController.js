@@ -255,34 +255,37 @@ export const getOccupiedSeats = async (req, res) => {
 
 export const getBookedSeats = async (req, res) => {
   try {
-    const { movieId, theatre, showTime, bookingDate } = req.query;
+    const { movieId, theatre, showTime } = req.query;
 
-    if (!movieId || !theatre || !showTime || !bookingDate) {
+    if (!movieId || !theatre || !showTime) {
       return res.status(400).json({
         success: false,
-        error: "Missing required parameters"
+        message: "Missing required parameters"
       });
     }
+
+    console.log("Fetching booked seats:", movieId, theatre, showTime);
 
     const bookings = await Booking.find({
       movie: movieId,
       theatre: theatre,
       showTime: showTime,
-      bookingDate: new Date(bookingDate),
       bookingStatus: "confirmed"
     });
 
-    const bookedSeats = bookings.flatMap(b => b.seats);
+    const bookedSeats = bookings.flatMap(b => b.seats || []);
 
-    res.status(200).json({
+    return res.json({
       success: true,
       bookedSeats
     });
 
   } catch (error) {
+    console.error("Error fetching booked seats:", error);
+
     res.status(500).json({
       success: false,
-      error: "Failed to fetch booked seats"
+      message: "Failed to fetch booked seats"
     });
   }
 };

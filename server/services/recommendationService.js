@@ -1,6 +1,7 @@
 import User from '../models/User.js';
 import Booking from '../models/Booking.js';
 import Movie from '../models/Movie.js';
+import mongoose from 'mongoose';
 
 // Helper function to get user preferences
 const getUserPreferences = async (userId) => {
@@ -188,6 +189,107 @@ export const getBecauseYouWatched = async (userId) => {
 
   } catch (error) {
     console.error('Error generating "Because You Watched" recommendations:', error);
+    return [];
+  }
+};
+
+// New function for theatre recommendations
+export const getRecommendedTheatres = async (movieId) => {
+  try {
+    // Use MongoDB aggregation on the Booking collection
+    const theatreCounts = await Booking.aggregate([
+      { 
+        $match: { 
+          movie: new mongoose.Types.ObjectId(movieId), 
+          bookingStatus: "confirmed" 
+        } 
+      },
+      { $group: { _id: "$theatre", count: { $sum: 1 } } },
+      { $sort: { count: -1 } }
+    ]);
+
+    // Convert the result into the required format
+    const recommendedTheatres = theatreCounts.map(item => ({
+      theatre: item._id,
+      count: item.count
+    }));
+
+    // Return the top 3 theatres
+    return recommendedTheatres.slice(0, 3);
+
+  } catch (error) {
+    console.error('Error generating theatre recommendations:', error);
+    return [];
+  }
+};
+
+// New function to get the single most popular theatre
+export const getRecommendedTheatre = async (movieId) => {
+  try {
+    // Use MongoDB aggregation on Booking collection
+    const theatreCounts = await Booking.aggregate([
+      { 
+        $match: { 
+          movie: new mongoose.Types.ObjectId(movieId), 
+          bookingStatus: "confirmed" 
+        } 
+      },
+      { $group: { _id: "$theatre", count: { $sum: 1 } } },
+      { $sort: { count: -1 } },
+      { $limit: 1 }
+    ]);
+
+    // Extract the theatre name
+    const recommendedTheatre = theatreCounts[0]?._id || null;
+
+    // Return only the theatre name
+    return {
+      theatre: recommendedTheatre
+    };
+
+  } catch (error) {
+    console.error('Error generating recommended theatre:', error);
+    return {
+      theatre: null
+    };
+  }
+};
+
+// New function for AI seat recommendations
+export const getRecommendedSeats = async (movieId, theatre, showTime) => {
+  try {
+    const bookings = await Booking.find({
+      movie: movieId,
+      theatre: theatre,
+      showTime: showTime,
+      bookingStatus: "confirmed"
+    });
+
+    const bookedSeats = bookings.flatMap(b => b.seats || []);
+
+    const preferredRows = ["D", "E", "F"];
+    const preferredColumns = [5, 6, 7];
+
+    const recommended = [];
+
+    for (const row of preferredRows) {
+      for (const col of preferredColumns) {
+        const seatId = `${row}${col}`;
+
+        if (!bookedSeats.includes(seatId)) {
+          recommended.push(seatId);
+        }
+
+        if (recommended.length === 3) {
+          return recommended;
+        }
+      }
+    }
+
+    return recommended;
+
+  } catch (error) {
+    console.error("Seat recommendation error:", error);
     return [];
   }
 };
