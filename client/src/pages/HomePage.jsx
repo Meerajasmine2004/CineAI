@@ -2,7 +2,6 @@ import { Link } from 'react-router-dom';
 import { Film, Play, Star, Clock } from 'lucide-react';
 import Footer from '../components/Footer';
 import RecommendedMovies from '../components/RecommendedMovies';
-import BecauseYouWatched from '../components/BecauseYouWatched';
 
 const HomePage = () => {
   const storedUser = localStorage.getItem("user");
@@ -122,11 +121,6 @@ const HomePage = () => {
       {/* AI Recommended Movies */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <RecommendedMovies userId={userId} />
-      </div>
-
-      {/* Because You Watched */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <BecauseYouWatched />
       </div>
 
       {/* Features */}

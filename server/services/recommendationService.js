@@ -159,40 +159,6 @@ export const getRecommendations = async (userId) => {
   }
 };
 
-// New function for "Because You Watched" recommendations
-export const getBecauseYouWatched = async (userId) => {
-  try {
-    // 1. Fetch the user's most recent confirmed booking
-    const lastBooking = await Booking.findOne({ 
-      user: userId, 
-      bookingStatus: "confirmed" 
-    })
-      .sort({ createdAt: -1 })
-      .populate("movie");
-
-    // 2. If no booking exists, return empty array
-    if (!lastBooking || !lastBooking.movie) {
-      return [];
-    }
-
-    // 3. Extract genres from the last booked movie
-    const watchedGenres = lastBooking.movie.genre || [];
-
-    // 4. Find movies with similar genres but exclude the watched movie itself
-    const similarMovies = await Movie.find({
-      genre: { $in: watchedGenres },
-      _id: { $ne: lastBooking.movie._id }
-    }).limit(5);
-
-    // 5. Return the similar movies
-    return similarMovies;
-
-  } catch (error) {
-    console.error('Error generating "Because You Watched" recommendations:', error);
-    return [];
-  }
-};
-
 // New function for theatre recommendations
 export const getRecommendedTheatres = async (movieId) => {
   try {
@@ -256,7 +222,7 @@ export const getRecommendedTheatre = async (movieId) => {
 };
 
 // New function for AI seat recommendations
-export const getRecommendedSeats = async (movieId, theatre, showTime) => {
+export const getRecommendedSeats = async (movieId, theatre, showTime, seatCount = 3) => {
   try {
     const bookings = await Booking.find({
       movie: movieId,
@@ -267,26 +233,46 @@ export const getRecommendedSeats = async (movieId, theatre, showTime) => {
 
     const bookedSeats = bookings.flatMap(b => b.seats || []);
 
-    const preferredRows = ["D", "E", "F"];
-    const preferredColumns = [5, 6, 7];
-
-    const recommended = [];
-
-    for (const row of preferredRows) {
-      for (const col of preferredColumns) {
-        const seatId = `${row}${col}`;
-
-        if (!bookedSeats.includes(seatId)) {
-          recommended.push(seatId);
+    // Best viewing rows (middle rows)
+    const bestRows = ["E", "F", "D", "G"];
+    // Center seat numbers
+    const centerSeats = [6, 7, 8, 9];
+    
+    // Generate all possible adjacent seat combinations
+    const allRecommendations = [];
+    
+    for (const row of bestRows) {
+      for (const startSeat of centerSeats) {
+        const seats = [];
+        let valid = true;
+        
+        for (let i = 0; i < seatCount; i++) {
+          const seatNumber = startSeat + i;
+          const seatId = `${row}${seatNumber}`;
+          
+          // Check if seat exists and is available
+          if (seatNumber > 14 || bookedSeats.includes(seatId)) {
+            valid = false;
+            break;
+          }
+          
+          seats.push(seatId);
         }
-
-        if (recommended.length === 3) {
-          return recommended;
+        
+        if (valid) {
+          // Score based on row preference and center position
+          let score = 0;
+          score += (4 - bestRows.indexOf(row)) * 10; // Row preference
+          score += (4 - Math.abs(7.5 - (startSeat + seatCount/2))) * 5; // Center preference
+          
+          allRecommendations.push({ seats, score });
         }
       }
     }
-
-    return recommended;
+    
+    // Sort by score and return best recommendation
+    allRecommendations.sort((a, b) => b.score - a.score);
+    return allRecommendations[0]?.seats || [];
 
   } catch (error) {
     console.error("Seat recommendation error:", error);

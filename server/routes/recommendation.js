@@ -1,71 +1,32 @@
 import express from 'express';
-import { getRecommendations, getBecauseYouWatched, getRecommendedTheatres, getRecommendedTheatre, getRecommendedSeats } from '../services/recommendationService.js';
+import { getRecommendations, getRecommendedTheatres, getRecommendedTheatre, getRecommendedSeats } from '../services/recommendationService.js';
 
 const router = express.Router();
 
-// GET /api/recommendations/:userId
-router.get('/:userId', async (req, res) => {
+// GET /api/recommendations/seats
+router.get("/seats", async (req, res) => {
   try {
-    const { userId } = req.params;
+    const { movieId, theatre, showTime, seatCount } = req.query;
 
-    // Validate userId parameter
-    if (!userId) {
-      return res.status(400).json({
-        success: false,
-        error: 'User ID is required'
-      });
-    }
+    console.log("Smart seat recommendation request:", movieId, theatre, showTime, seatCount);
 
-    // Get recommendations from service
-    const recommendations = await getRecommendations(userId);
+    const seats = await getRecommendedSeats(movieId, theatre, showTime, parseInt(seatCount) || 3);
 
-    // Return recommendations
-    res.status(200).json({
+    res.json({
       success: true,
-      data: recommendations,
-      count: recommendations.length
+      data: seats
     });
 
   } catch (error) {
-    console.error('Error in recommendation route:', error);
+    console.error("Smart seat recommendation error:", error);
+
     res.status(500).json({
       success: false,
-      error: 'Failed to generate recommendations'
+      message: "Failed to generate seat recommendations"
     });
   }
 });
 
-// GET /api/recommendations/because-you-watched/:userId
-router.get('/because-you-watched/:userId', async (req, res) => {
-  try {
-    const { userId } = req.params;
-
-    // Validate userId parameter
-    if (!userId) {
-      return res.status(400).json({
-        success: false,
-        error: 'User ID is required'
-      });
-    }
-
-    // Get "Because You Watched" recommendations from service
-    const recommendations = await getBecauseYouWatched(userId);
-
-    // Return recommendations
-    res.status(200).json({
-      success: true,
-      data: recommendations,
-      count: recommendations.length
-    });
-
-  } catch (error) {
-    console.error('Error in "Because You Watched" recommendation route:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to generate "Because You Watched" recommendations'
-    });
-  }
-});
 
 // GET /api/recommendations/theatres/:movieId
 router.get("/theatres/:movieId", async (req, res) => {
@@ -77,6 +38,7 @@ router.get("/theatres/:movieId", async (req, res) => {
   });
 });
 
+
 // GET /api/recommendations/theatre/:movieId
 router.get("/theatre/:movieId", async (req, res) => {
   const theatre = await getRecommendedTheatre(req.params.movieId);
@@ -87,26 +49,33 @@ router.get("/theatre/:movieId", async (req, res) => {
   });
 });
 
-// GET /api/recommendations/seats
-router.get("/seats", async (req, res) => {
+
+// ⚠️ KEEP THIS LAST
+// GET /api/recommendations/:userId
+router.get('/:userId', async (req, res) => {
   try {
-    const { movieId, theatre, showTime } = req.query;
+    const { userId } = req.params;
 
-    console.log("Seat recommendation request:", movieId, theatre, showTime);
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        error: 'User ID is required'
+      });
+    }
 
-    const seats = await getRecommendedSeats(movieId, theatre, showTime);
+    const recommendations = await getRecommendations(userId);
 
-    res.json({
+    res.status(200).json({
       success: true,
-      data: seats
+      data: recommendations,
+      count: recommendations.length
     });
 
   } catch (error) {
-    console.error("Seat recommendation error:", error);
-
+    console.error('Error in recommendation route:', error);
     res.status(500).json({
       success: false,
-      message: "Failed to generate seat recommendations"
+      error: 'Failed to generate recommendations'
     });
   }
 });
