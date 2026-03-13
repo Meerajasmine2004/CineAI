@@ -222,7 +222,7 @@ export const getRecommendedTheatre = async (movieId) => {
 };
 
 // New function for AI seat recommendations
-export const getRecommendedSeats = async (movieId, theatre, showTime, seatCount = 3) => {
+export const getRecommendedSeats = async (movieId, theatre, showTime, seatCount = 3, userType = 'general') => {
   try {
     const bookings = await Booking.find({
       movie: movieId,
@@ -233,16 +233,70 @@ export const getRecommendedSeats = async (movieId, theatre, showTime, seatCount 
 
     const bookedSeats = bookings.flatMap(b => b.seats || []);
 
-    // Best viewing rows (middle rows)
-    const bestRows = ["E", "F", "D", "G"];
-    // Center seat numbers
-    const centerSeats = [6, 7, 8, 9];
+    // Define row and seat preferences based on user type
+    let preferredRows, preferredSeats, scoringWeights;
+    
+    switch (userType) {
+      case 'couple':
+        // Couples prefer corner seats for privacy
+        preferredRows = ["E", "F", "D", "G"];
+        preferredSeats = [1, 2, 3, 4, 11, 12, 13, 14]; // Corner seats
+        scoringWeights = {
+          rowPreference: 10,
+          positionPreference: 15, // Higher weight for corner preference
+          centerPreference: 2
+        };
+        break;
+        
+      case 'elderly':
+        // Elderly prefer lower rows for easy access
+        preferredRows = ["A", "B", "C", "D"];
+        preferredSeats = [6, 7, 8, 9]; // Center seats for better viewing
+        scoringWeights = {
+          rowPreference: 15, // Higher weight for lower rows
+          positionPreference: 10,
+          centerPreference: 8
+        };
+        break;
+        
+      case 'family':
+        // Families prefer center rows for group seating
+        preferredRows = ["D", "E", "F", "G"];
+        preferredSeats = [5, 6, 7, 8, 9, 10]; // Center area for groups
+        scoringWeights = {
+          rowPreference: 10,
+          positionPreference: 8,
+          centerPreference: 12 // Higher weight for center preference
+        };
+        break;
+        
+      case 'budget':
+        // Budget users prefer cheapest seats (Normal rows A-C)
+        preferredRows = ["A", "B", "C"]; // Only cheapest rows
+        preferredSeats = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]; // All seats in cheap rows
+        scoringWeights = {
+          rowPreference: 20, // Highest weight for cheapest rows
+          positionPreference: 5,
+          centerPreference: 2
+        };
+        break;
+        
+      default:
+        // General preferences - middle rows, center seats
+        preferredRows = ["E", "F", "D", "G"];
+        preferredSeats = [6, 7, 8, 9];
+        scoringWeights = {
+          rowPreference: 10,
+          positionPreference: 10,
+          centerPreference: 5
+        };
+    }
     
     // Generate all possible adjacent seat combinations
     const allRecommendations = [];
     
-    for (const row of bestRows) {
-      for (const startSeat of centerSeats) {
+    for (const row of preferredRows) {
+      for (const startSeat of preferredSeats) {
         const seats = [];
         let valid = true;
         
@@ -260,10 +314,37 @@ export const getRecommendedSeats = async (movieId, theatre, showTime, seatCount 
         }
         
         if (valid) {
-          // Score based on row preference and center position
+          // Calculate score based on user type preferences
           let score = 0;
-          score += (4 - bestRows.indexOf(row)) * 10; // Row preference
-          score += (4 - Math.abs(7.5 - (startSeat + seatCount/2))) * 5; // Center preference
+          
+          // Row preference score
+          score += (preferredRows.length - preferredRows.indexOf(row)) * scoringWeights.rowPreference;
+          
+          // Position preference score (corner vs center)
+          if (userType === 'couple') {
+            // Couples prefer corners - higher score for seats 1-4 and 11-14
+            const isCorner = startSeat <= 4 || startSeat >= 11;
+            score += isCorner ? scoringWeights.positionPreference : 0;
+          } else {
+            // Others prefer center
+            const centerDistance = Math.abs(7.5 - (startSeat + seatCount/2));
+            score += (4 - centerDistance) * scoringWeights.centerPreference;
+          }
+          
+          // Elderly get bonus for lowest rows
+          if (userType === 'elderly' && ['A', 'B', 'C'].includes(row)) {
+            score += 20;
+          }
+          
+          // Families get bonus for center area
+          if (userType === 'family' && startSeat >= 5 && startSeat <= 10) {
+            score += 15;
+          }
+          
+          // Budget users get bonus for cheapest rows (A-C)
+          if (userType === 'budget' && ['A', 'B', 'C'].includes(row)) {
+            score += 25; // Highest bonus for cheapest rows
+          }
           
           allRecommendations.push({ seats, score });
         }

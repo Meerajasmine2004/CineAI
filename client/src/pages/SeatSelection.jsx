@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
   Calendar,
@@ -33,9 +33,11 @@ const SeatSelection = () => {
   const [bookedSeats, setBookedSeats] = useState([]);
   const [lockedSeats, setLockedSeats] = useState({});
   const [recommendedSeats, setRecommendedSeats] = useState([]);
+  const [aiRecommendedSeats, setAiRecommendedSeats] = useState([]);
   const [aiTheatre, setAiTheatre] = useState(null);
 
   const [socket, setSocket] = useState(null);
+  const [socketId, setSocketId] = useState(null);
   const [seatCount, setSeatCount] = useState(1);
 
   const rows = ["A","B","C","D","E","F","G","H","I","J"];
@@ -63,19 +65,52 @@ const SeatSelection = () => {
     const newSocket = io("http://localhost:5000");
     setSocket(newSocket);
 
-    newSocket.on("seatLocked", ({ seat, lockedBy }) => {
-      setLockedSeats(prev => ({ ...prev, [seat]: lockedBy }));
+    // Capture socket ID when connection is established
+    newSocket.on("connect", () => {
+      setSocketId(newSocket.id);
+      console.log("Socket connected with ID:", newSocket.id);
     });
 
-    newSocket.on("seatUnlocked", ({ seat }) => {
-      setLockedSeats(prev => {
-        const updated = { ...prev };
-        delete updated[seat];
-        return updated;
+    // Listen for locked seats
+    newSocket.on("seatLocked", ({ movieId, showTime, seat, lockedBy }) => {
+      if (movieId === id && showTime === selectedShowTime) {
+        setLockedSeats(prev => ({
+          ...prev,
+          [seat]: lockedBy
+        }));
+      }
+    });
+
+    // Listen for unlocked seats
+    newSocket.on("seatUnlocked", ({ movieId, showTime, seat }) => {
+      if (movieId === id && showTime === selectedShowTime) {
+        setLockedSeats(prev => {
+          const updated = { ...prev };
+          delete updated[seat];
+          return updated;
+        });
+      }
+    });
+
+    // Listen for seat already locked
+    newSocket.on("seatAlreadyLocked", ({ seat }) => {
+      toast.error(`Seat ${seat} is already locked by another user`);
+    });
+
+    // Cleanup: unlock all seats when component unmounts
+    return () => {
+      // Unlock all selected seats
+      selectedSeats.forEach(seat => {
+        newSocket.emit("unlockSeat", {
+          movieId: id,
+          theatre: selectedTheatre,
+          showTime: selectedShowTime,
+          bookingDate,
+          seat
+        });
       });
-    });
-
-    return () => newSocket.disconnect();
+      newSocket.disconnect();
+    };
   }, []);
 
   /* ---------------- MOVIE ---------------- */
@@ -137,10 +172,10 @@ const SeatSelection = () => {
   /* ---------------- BOOKED SEATS ---------------- */
 
   useEffect(() => {
-    if (!selectedShowTime || !selectedTheatre) return;
+    if (!selectedShowTime || !selectedTheatre || !bookingDate) return;
 
     fetchBookedSeats();
-  }, [selectedShowTime, selectedTheatre]);
+  }, [selectedShowTime, selectedTheatre, bookingDate]);
 
   const fetchBookedSeats = async () => {
     try {
@@ -148,7 +183,8 @@ const SeatSelection = () => {
         params: {
           movieId: id,
           theatre: selectedTheatre,
-          showTime: selectedShowTime
+          showTime: selectedShowTime,
+          bookingDate: bookingDate
         }
       });
 
@@ -160,46 +196,70 @@ const SeatSelection = () => {
 
   /* ---------------- SEAT CLICK ---------------- */
 
-  const handleSeatClick = seat => {
-    if (bookedSeats.includes(seat)) return;
+  const handleSeatClick = (seat) => {
 
-    // Extract row and seat number
-    const row = seat.charAt(0);
-    const seatNumber = parseInt(seat.substring(1));
-
-    // Clear existing selections
-    setSelectedSeats([]);
-    socket?.emit("unlockSeat", { seat: selectedSeats[0] });
-
-    // Generate adjacent seats
-    const adjacentSeats = [];
-    for (let i = 0; i < seatCount; i++) {
-      const newSeatNumber = seatNumber + i;
-      const newSeat = `${row}${newSeatNumber}`;
-      
-      // Check if seat exists in row
-      if (newSeatNumber > seatsPerRow) {
-        toast.error("Not enough adjacent seats available");
-        return;
-      }
-      
-      // Check if seat is available
-      if (bookedSeats.includes(newSeat) || 
-          (lockedSeats[newSeat] && lockedSeats[newSeat] !== socket.id)) {
-        toast.error("Not enough adjacent seats available");
-        return;
-      }
-      
-      adjacentSeats.push(newSeat);
+    if (!selectedShowTime || !selectedTheatre || !bookingDate) {
+      toast.error("Select date, theatre and showtime first");
+      return;
     }
 
-    // Select all adjacent seats
-    setSelectedSeats(adjacentSeats);
-    
-    // Lock each seat
-    adjacentSeats.forEach(seat => {
-      socket?.emit("lockSeat", { seat });
+    if (bookedSeats.includes(seat)) {
+      toast.error("Seat already booked");
+      return;
+    }
+
+    if (lockedSeats[seat] && !selectedSeats.includes(seat)) {
+      toast.error("Seat locked by another user");
+      return;
+    }
+
+    const row = seat.charAt(0);
+    const seatNumber = parseInt(seat.slice(1));
+
+    const seatsToSelect = [];
+
+    for (let i = 0; i < seatCount; i++) {
+      const nextSeatNumber = seatNumber + i;
+      const nextSeat = `${row}${nextSeatNumber}`;
+
+      if (nextSeatNumber > seatsPerRow) {
+        toast.error("Not enough adjacent seats available");
+        return;
+      }
+
+      if (bookedSeats.includes(nextSeat) || lockedSeats[nextSeat]) {
+        toast.error("Adjacent seats not available");
+        return;
+      }
+
+      seatsToSelect.push(nextSeat);
+    }
+
+    // unlock previous seats
+    selectedSeats.forEach(s => {
+      socket.emit("unlockSeat", {
+        movieId: id,
+        theatre: selectedTheatre,
+        showTime: selectedShowTime,
+        bookingDate,
+        seat: s
+      });
     });
+
+    // select new seats
+    setSelectedSeats(seatsToSelect);
+
+    // lock seats
+    seatsToSelect.forEach(s => {
+      socket.emit("lockSeat", {
+        movieId: id,
+        theatre: selectedTheatre,
+        showTime: selectedShowTime,
+        bookingDate,
+        seat: s
+      });
+    });
+
   };
 
   /* ---------------- PRICE ---------------- */
@@ -210,9 +270,9 @@ const SeatSelection = () => {
     selectedSeats.forEach(seat => {
       const row = seat.charAt(0);
 
-      if (["A","B","C"].includes(row)) total += 200;
-      else if (["D","E","F"].includes(row)) total += 250;
-      else total += 350;
+      if (["A","B","C"].includes(row)) total += 200;  // Regular
+      else if (["D","E"].includes(row)) total += 250;  // Premium
+      else total += 350;                               // VIP (F-J)
     });
 
     return total;
@@ -220,17 +280,30 @@ const SeatSelection = () => {
 
   /* ---------------- SEAT STYLE ---------------- */
 
-  const getSeatClass = (seat,row) => {
+  const getSeatType = (row) => {
+    if (["A", "B", "C"].includes(row)) return "regular";    // ₹200
+    if (["D", "E"].includes(row)) return "premium";        // ₹250
+    return "vip";                                           // ₹350 (F-J)
+  };
 
+  const getSeatClass = (seat, row) => {
+    // BOOKED seats (RED)
     if (bookedSeats.includes(seat))
       return "bg-red-600 text-white cursor-not-allowed";
 
+    // LOCKED seats (YELLOW)
+    if (lockedSeats[seat] && !selectedSeats.includes(seat))
+      return "bg-yellow-500 text-black cursor-not-allowed";
+
+    // SELECTED seats (GREEN)
     if (selectedSeats.includes(seat))
       return "bg-green-600 text-white";
 
+    // AI RECOMMENDED seats (PURPLE)
     if (recommendedSeats.includes(seat))
       return "bg-purple-600 text-white ring-2 ring-purple-300 scale-110";
 
+    // Seat category styles
     if (["A","B","C"].includes(row))
       return "border border-gray-500 text-gray-300 hover:bg-gray-700";
 
@@ -242,34 +315,26 @@ const SeatSelection = () => {
 
   /* ---------------- BOOKING ---------------- */
 
-  const confirmBooking = async () => {
-
+  const confirmBooking = () => {
     if (!selectedSeats.length) {
       toast.error("Select seats");
       return;
     }
 
-    try {
-      setBookingLoading(true);
+    // Prepare booking data for payment page
+    const bookingData = {
+      movie: id,
+      theatre: selectedTheatre,
+      showTime: selectedShowTime,
+      bookingDate,
+      seats: selectedSeats,
+      totalPrice: calculateTotalPrice()
+    };
 
-      const res = await api.post("/bookings",{
-        movie:id,
-        theatre:selectedTheatre,
-        showTime:selectedShowTime,
-        bookingDate,
-        seats:selectedSeats
-      });
-
-      if(res.data.success){
-        toast.success("Booking Confirmed");
-        navigate("/bookings");
-      }
-
-    } catch {
-      toast.error("Booking failed");
-    } finally {
-      setBookingLoading(false);
-    }
+    // Redirect to payment page with booking data
+    navigate("/payment", {
+      state: bookingData
+    });
   };
 
   /* ---------------- LOADING ---------------- */
@@ -519,20 +584,26 @@ const SeatSelection = () => {
 
             {/* LEGEND */}
             <div className="flex items-center justify-center gap-6 mt-8 flex-wrap">
+              <div className="legend-available flex items-center gap-2">
+                <span className="seat-box regular"></span>
+                <span className="seat-box premium"></span>
+                <span className="seat-box vip"></span>
+                <span className="legend-label">Available</span>
+              </div>
               <div className="flex items-center gap-2">
-                <div className="w-6 h-6 bg-green-600 rounded"></div>
+                <div className="w-6 h-6 rounded" style={{backgroundColor: '#22c55e'}}></div>
                 <span className="text-sm">Selected</span>
               </div>
               <div className="flex items-center gap-2">
-                <div className="w-6 h-6 bg-red-600 rounded"></div>
-                <span className="text-sm">Booked</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="w-6 h-6 bg-yellow-500 text-black rounded"></div>
+                <div className="w-6 h-6 rounded" style={{backgroundColor: '#facc15'}}></div>
                 <span className="text-sm">Locked</span>
               </div>
               <div className="flex items-center gap-2">
-                <div className="w-6 h-6 bg-purple-600 rounded"></div>
+                <div className="w-6 h-6 rounded" style={{backgroundColor: '#ef4444'}}></div>
+                <span className="text-sm">Booked</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-6 h-6 rounded" style={{backgroundColor: '#a855f7'}}></div>
                 <span className="text-sm">AI Recommended ✨</span>
               </div>
             </div>
@@ -563,3 +634,85 @@ const SeatSelection = () => {
 };
 
 export default SeatSelection;
+
+// Add CSS styles for seat states
+const style = document.createElement('style');
+style.textContent = `
+  .seat-box {
+    width: 18px;
+    height: 18px;
+    border-radius: 4px;
+    margin-right: 6px;
+    display: inline-block;
+  }
+
+  .seat-box.regular {
+    border: 1px solid #e5e7eb;
+  }
+
+  .seat-box.premium {
+    border: 1px solid #3b82f6;
+  }
+
+  .seat-box.vip {
+    border: 1px solid #facc15;
+  }
+
+  .legend-available {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+  }
+
+  .legend-label {
+    margin-left: 8px;
+    font-size: 14px;
+    color: white;
+  }
+
+  .seat.available.regular {
+    background: transparent;
+    border: 1px solid #e5e7eb;
+    color: white;
+    cursor: pointer;
+  }
+  
+  .seat.available.premium {
+    background: transparent;
+    border: 1px solid #3b82f6;
+    color: #3b82f6;
+    cursor: pointer;
+  }
+  
+  .seat.available.vip {
+    background: transparent;
+    border: 1px solid #facc15;
+    color: #facc15;
+    cursor: pointer;
+  }
+  
+  .seat.selected {
+    background: #22c55e;
+    color: white;
+    cursor: pointer;
+  }
+  
+  .seat.locked {
+    background: #facc15;
+    color: black;
+    cursor: not-allowed;
+  }
+  
+  .seat.booked {
+    background: #ef4444;
+    color: white;
+    cursor: not-allowed;
+  }
+  
+  .seat.recommended {
+    background: #a855f7;
+    color: white;
+    cursor: pointer;
+  }
+`;
+document.head.appendChild(style);

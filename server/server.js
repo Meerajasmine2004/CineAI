@@ -13,6 +13,7 @@ import userRoutes from './routes/userRoutes.js';
 import movieRoutes from './routes/movieRoutes.js';
 import bookingRoutes from './routes/bookingRoutes.js';
 import recommendationRoutes from './routes/recommendation.js';
+import chatbotRoutes from './routes/chatbot.js';
 
 // Load environment variables
 dotenv.config();
@@ -29,12 +30,14 @@ const server = http.createServer(app);
 // Initialize Socket.io
 const io = new Server(server, {
   cors: {
-    origin: "http://localhost:5173",
+    origin: "*",
     methods: ["GET", "POST"]
   }
 });
 
-// In-memory seat lock store
+app.set("io", io);
+
+// Seat lock storage object
 const seatLocks = {};
 
 // Socket.io connection handling
@@ -42,52 +45,67 @@ io.on('connection', (socket) => {
   console.log(`User connected: ${socket.id}`);
 
   // Lock seat
-  socket.on('lockSeat', ({ movieId, showTime, seat }) => {
-    const lockKey = `${movieId}_${showTime}_${seat}`;
-    
+  socket.on('lockSeat', ({ movieId, theatre, showTime, bookingDate, seat }) => {
+    const lockKey = `${movieId}_${theatre}_${showTime}_${bookingDate}_${seat}`;
+
     if (!seatLocks[lockKey]) {
-      // Lock the seat
       seatLocks[lockKey] = socket.id;
-      
-      // Notify all users that seat is locked
-      io.emit('seatLocked', { movieId, showTime, seat, lockedBy: socket.id });
-      
-      console.log(`Seat ${seat} locked by ${socket.id}`);
+
+      socket.broadcast.emit('seatLocked', {
+        movieId,
+        theatre,
+        showTime,
+        bookingDate,
+        seat,
+        lockedBy: socket.id
+      });
+
+      console.log(`Seat ${seat} locked for ${lockKey} by ${socket.id}`);
     } else {
-      // Seat already locked
-      socket.emit('seatAlreadyLocked', { movieId, showTime, seat, lockedBy: seatLocks[lockKey] });
-      
-      console.log(`Seat ${seat} already locked by ${seatLocks[lockKey]}`);
+      socket.emit('seatAlreadyLocked', {
+        movieId,
+        theatre,
+        showTime,
+        bookingDate,
+        seat
+      });
     }
   });
 
   // Unlock seat
-  socket.on('unlockSeat', ({ movieId, showTime, seat }) => {
-    const lockKey = `${movieId}_${showTime}_${seat}`;
-    
+  socket.on('unlockSeat', ({ movieId, theatre, showTime, bookingDate, seat }) => {
+    const lockKey = `${movieId}_${theatre}_${showTime}_${bookingDate}_${seat}`;
+
     if (seatLocks[lockKey] === socket.id) {
-      // Unlock the seat
       delete seatLocks[lockKey];
-      
-      // Notify all users that seat is unlocked
-      io.emit('seatUnlocked', { movieId, showTime, seat });
-      
-      console.log(`Seat ${seat} unlocked by ${socket.id}`);
+
+      socket.broadcast.emit('seatUnlocked', {
+        movieId,
+        theatre,
+        showTime,
+        bookingDate,
+        seat
+      });
+
+      console.log(`Seat ${seat} unlocked for ${lockKey} by ${socket.id}`);
     }
   });
 
   // Handle disconnect
   socket.on('disconnect', () => {
     console.log(`User disconnected: ${socket.id}`);
-    
-    // Remove all locks held by this socket
+
     Object.keys(seatLocks).forEach(lockKey => {
       if (seatLocks[lockKey] === socket.id) {
         delete seatLocks[lockKey];
-        io.emit('seatUnlocked', { 
-          movieId: lockKey.split('_')[0], 
-          showTime: lockKey.split('_')[1], 
-          seat: lockKey.split('_')[2] 
+
+        const parts = lockKey.split('_');
+        socket.broadcast.emit('seatUnlocked', {
+          movieId: parts[0],
+          theatre: parts[1],
+          showTime: parts[2],
+          bookingDate: parts[3],
+          seat: parts[4]
         });
       }
     });
@@ -129,6 +147,7 @@ app.use('/api/users', userRoutes);
 app.use('/api/movies', movieRoutes);
 app.use('/api/bookings', bookingRoutes);
 app.use('/api/recommendations', recommendationRoutes);
+app.use('/api/chatbot', chatbotRoutes);
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {

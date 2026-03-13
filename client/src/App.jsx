@@ -16,7 +16,9 @@ import MovieDetails from "./pages/MovieDetails";
 import ComingSoon from "./pages/ComingSoon";
 import MyBookings from "./pages/MyBookings";
 import SeatSelection from "./pages/SeatSelection";
+import Payment from "./pages/Payment";
 import ProtectedRoute from "./routes/ProtectedRoute";
+import CineAIAssistant from "./components/CineAIAssistant";
 
 // Placeholder pages
 const SearchPage = () => (
@@ -84,6 +86,7 @@ function App() {
                     <MyBookings />
                   </ProtectedRoute>
                 } />
+                <Route path="/payment" element={<Payment />} />
                 <Route path="/search" element={<SearchPage />} />
 
                 {/* 404 */}
@@ -110,6 +113,9 @@ function App() {
           </div>
         </BookingProvider>
       </AuthProvider>
+      
+      {/* Chatbot Assistant */}
+      <CineAIAssistant />
     </Router>
   );
 }

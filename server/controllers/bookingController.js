@@ -1,7 +1,7 @@
 import express from 'express';
 import Booking from '../models/Booking.js';
 import Movie from '../models/Movie.js';
-import { io } from '../server.js';
+import { io, seatLocks } from '../server.js';
 
 // Create a new booking
 export const createBooking = async (req, res) => {
@@ -43,6 +43,7 @@ export const createBooking = async (req, res) => {
     // Check for double booking conflicts
     const existingBookings = await Booking.find({
       movie,
+      theatre,
       showTime,
       bookingDate: new Date(bookingDate),
       bookingStatus: "confirmed"
@@ -230,8 +231,13 @@ export const getOccupiedSeats = async (req, res) => {
     // Add currently locked seats from memory store
     const lockedSeats = [];
     Object.keys(seatLocks).forEach(lockKey => {
-      const [keyMovieId, keyShowTime, seat] = lockKey.split('_');
-      if (keyMovieId === movieId && keyShowTime === showTime) {
+      const [keyMovieId, keyTheatre, keyShowTime, keyDate, seat] = lockKey.split('_');
+      if (
+        keyMovieId === movieId &&
+        keyTheatre === theatre &&
+        keyShowTime === showTime &&
+        keyDate === date
+      ) {
         lockedSeats.push(seat);
       }
     });
@@ -255,21 +261,22 @@ export const getOccupiedSeats = async (req, res) => {
 
 export const getBookedSeats = async (req, res) => {
   try {
-    const { movieId, theatre, showTime } = req.query;
+    const { movieId, theatre, showTime, bookingDate } = req.query;
 
-    if (!movieId || !theatre || !showTime) {
+    if (!movieId || !theatre || !showTime || !bookingDate) {
       return res.status(400).json({
         success: false,
         message: "Missing required parameters"
       });
     }
 
-    console.log("Fetching booked seats:", movieId, theatre, showTime);
+    console.log("Fetching booked seats:", movieId, theatre, showTime, bookingDate);
 
     const bookings = await Booking.find({
       movie: movieId,
       theatre: theatre,
       showTime: showTime,
+      bookingDate: new Date(bookingDate),
       bookingStatus: "confirmed"
     });
 
