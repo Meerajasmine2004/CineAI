@@ -13,6 +13,7 @@ import userRoutes from './routes/userRoutes.js';
 import movieRoutes from './routes/movieRoutes.js';
 import bookingRoutes from './routes/bookingRoutes.js';
 import recommendationRoutes from './routes/recommendation.js';
+import SeatLock from './models/SeatLock.js';
 import chatbotRoutes from './routes/chatbot.js';
 
 // Load environment variables
@@ -37,31 +38,65 @@ const io = new Server(server, {
 
 app.set("io", io);
 
-// Seat lock storage object
-const seatLocks = {};
-
 // Socket.io connection handling
 io.on('connection', (socket) => {
   console.log(`User connected: ${socket.id}`);
 
   // Lock seat
-  socket.on('lockSeat', ({ movieId, theatre, showTime, bookingDate, seat }) => {
+  socket.on('lockSeat', async ({ movieId, theatre, showTime, bookingDate, seat, userId }) => {
     const lockKey = `${movieId}_${theatre}_${showTime}_${bookingDate}_${seat}`;
+    const currentUserId = userId || socket.handshake.auth.userId || socket.id;
 
-    if (!seatLocks[lockKey]) {
-      seatLocks[lockKey] = socket.id;
+    try {
+      // Check if seat is already locked
+      const existingLock = await SeatLock.findOne({ key: lockKey });
 
-      socket.broadcast.emit('seatLocked', {
-        movieId,
-        theatre,
-        showTime,
-        bookingDate,
-        seat,
-        lockedBy: socket.id
-      });
+      if (existingLock) {
+        // Check if locked by same user
+        if (existingLock.userId === currentUserId) {
+          // Allow same user to reselect - update expiry
+          await SeatLock.updateOne(
+            { key: lockKey },
+            { $set: { expiresAt: new Date(Date.now() + 5 * 60 * 1000) } }
+          );
+          
+          // Confirm to current user
+          socket.emit('seatLocked', {
+            movieId,
+            theatre,
+            showTime,
+            bookingDate,
+            seat,
+            lockedBy: currentUserId
+          });
+        } else {
+          // Locked by different user
+          socket.emit('seatAlreadyLocked', {
+            movieId,
+            theatre,
+            showTime,
+            bookingDate,
+            seat
+          });
+        }
+      } else {
+        // Create new lock
+        await SeatLock.create({
+          key: lockKey,
+          userId: currentUserId,
+          expiresAt: new Date(Date.now() + 5 * 60 * 1000)
+        });
 
-      console.log(`Seat ${seat} locked for ${lockKey} by ${socket.id}`);
-    } else {
+        // Broadcast to all users (including current user)
+        io.emit('seatUpdate', {
+          seatId: seat,
+          lockedBy: currentUserId
+        });
+
+        console.log(`Seat ${seat} locked for ${lockKey} by ${currentUserId}`);
+      }
+    } catch (error) {
+      console.error('Lock seat error:', error);
       socket.emit('seatAlreadyLocked', {
         movieId,
         theatre,
@@ -73,47 +108,55 @@ io.on('connection', (socket) => {
   });
 
   // Unlock seat
-  socket.on('unlockSeat', ({ movieId, theatre, showTime, bookingDate, seat }) => {
+  socket.on('unlockSeat', async ({ movieId, theatre, showTime, bookingDate, seat }) => {
     const lockKey = `${movieId}_${theatre}_${showTime}_${bookingDate}_${seat}`;
 
-    if (seatLocks[lockKey] === socket.id) {
-      delete seatLocks[lockKey];
+    try {
+      // Delete the lock from MongoDB
+      const result = await SeatLock.deleteOne({ key: lockKey });
 
-      socket.broadcast.emit('seatUnlocked', {
-        movieId,
-        theatre,
-        showTime,
-        bookingDate,
-        seat
-      });
+      if (result.deletedCount > 0) {
+        // Lock was deleted successfully
+        io.emit('seatUnlocked', {
+          movieId,
+          theatre,
+          showTime,
+          bookingDate,
+          seat
+        });
 
-      console.log(`Seat ${seat} unlocked for ${lockKey} by ${socket.id}`);
+        console.log(`Seat ${seat} unlocked for ${lockKey} by ${socket.id}`);
+      }
+    } catch (error) {
+      console.error('Unlock seat error:', error);
     }
   });
 
   // Handle disconnect
-  socket.on('disconnect', () => {
+  socket.on('disconnect', async () => {
     console.log(`User disconnected: ${socket.id}`);
 
-    Object.keys(seatLocks).forEach(lockKey => {
-      if (seatLocks[lockKey] === socket.id) {
-        delete seatLocks[lockKey];
+    try {
+      // Find and delete all locks created by this socket
+      // Note: We don't track socket.id in MongoDB, so we'll clean up expired locks
+      // In a production environment, you might want to track socket.id or user sessions
+      
+      // For now, we'll let the TTL handle expired locks automatically
+      // But we can also clean up any locks that are very old (older than 5 minutes)
+      const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
+      await SeatLock.deleteMany({ 
+        expiresAt: { $lt: fiveMinutesAgo } 
+      });
 
-        const parts = lockKey.split('_');
-        socket.broadcast.emit('seatUnlocked', {
-          movieId: parts[0],
-          theatre: parts[1],
-          showTime: parts[2],
-          bookingDate: parts[3],
-          seat: parts[4]
-        });
-      }
-    });
+      console.log(`Cleaned up expired locks for disconnected user ${socket.id}`);
+    } catch (error) {
+      console.error('Disconnect cleanup error:', error);
+    }
   });
 });
 
-// Export seatLocks for controllers to use
-export { seatLocks, io };
+// Export io for controllers to use
+export { io };
 
 // Rate limiting
 const limiter = rateLimit({

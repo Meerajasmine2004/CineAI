@@ -52,6 +52,10 @@ const bookingSchema = new mongoose.Schema({
 // Indexes for better performance
 bookingSchema.index({ user: 1, movie: 1 });
 bookingSchema.index({ bookingStatus: 1 });
+bookingSchema.index(
+  { movie: 1, theatre: 1, showTime: 1, bookingDate: 1 },
+  { unique: false }
+);
 
 const Booking = mongoose.model('Booking', bookingSchema);
 

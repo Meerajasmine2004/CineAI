@@ -1,11 +1,33 @@
 import React, { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import api from '../services/api';
+
+// Helper function to get movie poster images
+const getMovieImage = (title) => {
+  if (!title) return "https://via.placeholder.com/300x450?text=No+Image";
+
+  // Debug log
+  console.log("Movie title:", title);
+
+  const normalized = title?.toLowerCase()?.trim();
+
+  const images = {
+    "john wick": "https://image.tmdb.org/t/p/w500/fZPSd91yGE9fCcCe6OoQr6E3Bev.jpg",
+    "inception": "https://m.media-amazon.com/images/I/91Rc8cAmnAL._AC_SY679_.jpg",
+    "deadpool & wolverine": "https://image.tmdb.org/t/p/w500/8cdWjvZQUExUUTzyp4t6EDMubfO.jpg",
+    "the dark knight": "https://image.tmdb.org/t/p/w500/qJ2tW6WMUDux911r6m7haRef0WH.jpg",
+    "avatar": "https://image.tmdb.org/t/p/w500/kyeqWdyUXW608qlYkRqosgbbJyK.jpg",
+    "gladiator": "https://image.tmdb.org/t/p/w500/ty8TGRuvJLPUmAR1H1nRIsgwvim.jpg"
+  };
+
+  return images[normalized] || "https://via.placeholder.com/300x450?text=No+Image";
+};
 
 const RecommendedMovies = () => {
   const [recommendations, setRecommendations] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const navigate = useNavigate();
 
   // Get user from localStorage
   const storedUser = localStorage.getItem("user");
@@ -58,16 +80,27 @@ const RecommendedMovies = () => {
   }, [userId]); // Include userId dependency for the event listener
 
   return (
-    <div className="py-12">
+    <div className="py-12 bg-[#020617]">
       <h2 className="text-3xl font-bold text-white mb-8">Recommended For You</h2>
       
       {loading ? (
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-6">
           {[...Array(5)].map((_, index) => (
-            <div key={index} className="animate-pulse">
-              <div className="bg-gray-300 rounded-lg h-64 mb-2"></div>
-              <div className="h-4 bg-gray-300 rounded mb-2"></div>
-              <div className="h-3 bg-gray-300 rounded w-3/4"></div>
+            <div key={index} className="bg-[#0f172a] p-3 rounded-xl shadow-lg animate-pulse">
+              {/* Movie Poster Skeleton */}
+              <div className="bg-gray-700 rounded-lg h-64"></div>
+              
+              {/* Title Skeleton */}
+              <div className="h-4 bg-gray-700 rounded mt-2"></div>
+              
+              {/* Genre Skeleton */}
+              <div className="flex gap-2 mt-1">
+                <div className="h-3 bg-gray-700 rounded w-12"></div>
+                <div className="h-3 bg-gray-700 rounded w-12"></div>
+              </div>
+              
+              {/* Button Skeleton */}
+              <div className="h-8 bg-gray-700 rounded mt-2"></div>
             </div>
           ))}
         </div>
@@ -88,62 +121,46 @@ const RecommendedMovies = () => {
       ) : (
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-6">
           {recommendations.map((movie) => (
-            <div key={movie._id} className="group cursor-pointer transition-transform duration-300 hover:scale-105">
-              {/* Movie Poster */}
-              <div className="relative overflow-hidden rounded-lg mb-3">
+            <div key={movie._id} className="bg-[#0f172a] p-3 rounded-xl shadow-lg hover:scale-105 transition duration-300">
+              {/* Movie Poster with AI Badge - Fixed Positioning */}
+              <div className="relative">
                 <img
-                  src={movie.poster}
+                  src={getMovieImage(movie.title)}
                   alt={movie.title}
-                  className="w-full h-64 object-cover"
+                  className="w-full h-64 object-cover rounded-lg"
                   onError={(e) => {
-                    e.target.src = 'https://via.placeholder.com/300x450/cccccc/666666?text=No+Poster';
+                    e.target.src = "https://via.placeholder.com/300x450?text=No+Image";
                   }}
                 />
-                
-                {/* Recommendation Score Badge */}
-                {movie.recommendationScore && (
-                  <div className="absolute top-2 right-2 bg-blue-600 text-white text-xs px-2 py-1 rounded-full shadow">
-                    AI Pick
-                  </div>
-                )}
+
+                <div className="absolute top-2 right-2 bg-blue-500 text-white px-3 py-1 text-xs rounded-full">
+                  AI Pick
+                </div>
               </div>
               
               {/* Movie Info */}
-              <div className="space-y-2">
+              <div>
                 {/* Title */}
-                <h3 className="font-semibold text-white text-sm mt-2 line-clamp-1">
+                <h3 className="text-white mt-2 font-semibold">
                   {movie.title}
                 </h3>
                 
-                {/* Genre */}
-                <div className="flex flex-wrap gap-1">
-                 {(movie.genre || []).slice(0, 2).map((g, index) => (
-                    <span
-                      key={index}
-                      className="text-xs bg-gray-200 text-gray-800 px-2 py-1 rounded"
-                    >
+                {/* Genre Tags */}
+                <div className="flex gap-2 mt-1 flex-wrap">
+                  {movie.genre?.slice(0,2).map((g, i) => (
+                    <span key={i} className="bg-gray-200 text-black px-2 py-1 text-xs rounded">
                       {g}
                     </span>
                   ))}
-                  {(movie.genre || []).length > 2 && (
-                    <span className="text-xs text-gray-400">
-                      +{(movie.genre || []).length - 2}
-                    </span>
-                  )}
                 </div>
                 
-                {/* Language */}
-                <p className="text-xs text-gray-400 capitalize">
-                  {movie.language}
-                </p>
-                
-                {/* Book Now Button */}
-                <Link
-                  to={`/movies/${movie._id}`}
-                  className="block mt-2 text-center bg-cinema-600 text-white py-1 rounded hover:bg-cinema-500 transition"
+                {/* Book Button */}
+                <button 
+                  onClick={() => navigate(`/movie/${movie._id}`)}
+                  className="bg-red-500 hover:bg-red-600 w-full mt-2 py-2 rounded text-white font-medium"
                 >
                   Book Now
-                </Link>
+                </button>
               </div>
             </div>
           ))}

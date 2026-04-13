@@ -199,7 +199,7 @@ const MovieDetails = () => {
                   <h3 className="text-lg font-semibold text-white mb-2">Languages</h3>
                   <div className="flex items-center gap-2">
                     <Globe className="w-4 h-4 text-cinema-500" />
-                    <span className="text-dark-300">{movie.language?.join(', ') || "Unknown Language"}</span>
+                    <span className="text-dark-300">{movie.language?.join(', ') || "English"}</span>
                   </div>
                 </div>
 

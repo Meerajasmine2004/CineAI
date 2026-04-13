@@ -1,8 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
 import { Send, X, Minimize2, Maximize2, Bot, User, Calendar, MapPin, Clock, Users, CreditCard, Trash2 } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
 
 const CineAIAssistant = () => {
+  const navigate = useNavigate();
   const [isOpen, setIsOpen] = useState(false);
   const [isMinimized, setIsMinimized] = useState(false);
   const [messages, setMessages] = useState([]);
@@ -153,6 +155,9 @@ const CineAIAssistant = () => {
         data: response.data.data
       };
 
+      // ADD FRONTEND DEBUG LOG
+      console.log("CARD RECEIVED:", response.data.data);
+
       setMessages(prev => {
         const updatedMessages = [...prev, botMessage];
         // Save to localStorage
@@ -197,9 +202,16 @@ const CineAIAssistant = () => {
 
   const handleProceedToPayment = () => {
     if (bookingData) {
+      // DEBUG (IMPORTANT)
+      console.log("SENDING:", bookingData);
+      
       // Store booking data in sessionStorage for payment page
       sessionStorage.setItem('chatbotBookingData', JSON.stringify(bookingData));
-      window.location.href = '/payment';
+      
+      // Use React Router navigation with state
+      navigate("/payment", {
+        state: bookingData
+      });
     }
   };
 
@@ -330,17 +342,20 @@ const CineAIAssistant = () => {
 
                       {/* Booking Card */}
                       {message.data && (
-                        <div className="mt-3 bg-gradient-to-r from-slate-800 to-slate-700 border border-slate-600 rounded-xl p-4 shadow-sm animate-fade-in hover:shadow-lg transition-all duration-300">
-                          <h4 className="font-semibold text-white mb-3 flex items-center gap-2">
-                            <Calendar className="w-4 h-4 text-purple-400" />
-                            Recommended Booking
-                          </h4>
+                        <>
+                          {/* DEBUG (IMPORTANT) */}
+                          {console.log("CARD DATA:", message.data)}
+                          <div className="mt-3 bg-gradient-to-r from-slate-800 to-slate-700 border border-slate-600 rounded-xl p-4 shadow-sm animate-fade-in hover:shadow-lg transition-all duration-300">
+                            <h4 className="font-semibold text-white mb-3 flex items-center gap-2">
+                              <Calendar className="w-4 h-4 text-purple-400" />
+                              Recommended Booking
+                            </h4>
                           
                           <div className="space-y-2">
                             {message.data.movie && (
                               <div className="flex items-center gap-2">
                                 <span className="text-sm text-slate-300">Movie:</span>
-                                <span className="text-sm font-medium text-white">{message.data.movie.title}</span>
+                                <span className="text-sm font-medium text-white">{message.data.movie}</span>
                               </div>
                             )}
                             
@@ -352,11 +367,11 @@ const CineAIAssistant = () => {
                               </div>
                             )}
                             
-                            {message.data.showTime && (
+                            {message.data.time && (
                               <div className="flex items-center gap-2">
                                 <Clock className="w-4 h-4 text-purple-400" />
                                 <span className="text-sm text-slate-300">Time:</span>
-                                <span className="text-sm font-medium text-white">{message.data.showTime}</span>
+                                <span className="text-sm font-medium text-white">{message.data.time}</span>
                               </div>
                             )}
                             
@@ -368,24 +383,58 @@ const CineAIAssistant = () => {
                               </div>
                             )}
                             
-                            {message.data.totalPrice && (
+                            {message.data.total && (
                               <div className="flex items-center gap-2">
                                 <span className="text-sm text-slate-300">Total:</span>
                                 <span className="text-sm font-bold text-purple-400">
-                                  ₹{message.data.totalPrice.toLocaleString('en-IN')}
+                                  ₹{(message.data.total || 0).toLocaleString('en-IN')}
                                 </span>
                               </div>
                             )}
                           </div>
 
                           <button
-                            onClick={handleProceedToPayment}
+                            onClick={() => {
+                              console.log("SENDING TO PAYMENT:", message.data);
+
+                              const paymentData = {
+                                movie: {
+                                  id: message.data.movieId || "default-id",
+                                  title: message.data.movie
+                                },
+                                theatre: message.data.theatre,
+                                showTime: message.data.time,
+                                seats: message.data.seats,
+                                totalPrice: message.data.total,
+                                bookingDate: new Date().toISOString()
+                              };
+
+                              // Store in sessionStorage for consistency
+                              sessionStorage.setItem(
+                                "chatbotBookingData",
+                                JSON.stringify({
+                                  movie: { 
+                                    id: message.data.movieId || "default-id",
+                                    title: message.data.movie 
+                                  },
+                                  theatre: message.data.theatre,
+                                  showTime: message.data.time,
+                                  seats: message.data.seats,
+                                  totalPrice: message.data.total
+                                })
+                              );
+
+                              navigate("/payment", {
+                                state: paymentData
+                              });
+                            }}
                             className="mt-4 w-full bg-gradient-to-r from-purple-600 to-cinema-600 text-white py-2 px-4 rounded-lg flex items-center justify-center gap-2 hover:shadow-lg transition-all duration-200 hover:from-purple-700 hover:to-cinema-700"
                           >
                             <CreditCard className="w-4 h-4" />
                             Proceed to Payment
                           </button>
                         </div>
+                        </>
                       )}
                     </div>
                   </div>

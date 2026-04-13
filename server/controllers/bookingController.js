@@ -1,10 +1,14 @@
 import express from 'express';
+import mongoose from 'mongoose';
 import Booking from '../models/Booking.js';
 import Movie from '../models/Movie.js';
-import { io, seatLocks } from '../server.js';
+import SeatLock from '../models/SeatLock.js';
+import { io } from '../server.js';
 
 // Create a new booking
 export const createBooking = async (req, res) => {
+  const session = await mongoose.startSession();
+  
   try {
     const { movie, theatre, bookingDate, showTime, seats } = req.body;
 
@@ -16,8 +20,16 @@ export const createBooking = async (req, res) => {
       });
     }
 
-    // Check if movie exists
-    const existingMovie = await Movie.findById(movie);
+    // Check if movie exists (handle both ID and title)
+    let existingMovie;
+    if (mongoose.Types.ObjectId.isValid(movie)) {
+      // If movie is a valid ObjectId, search by ID
+      existingMovie = await Movie.findById(movie);
+    } else {
+      // If movie is a string (title), search by title
+      existingMovie = await Movie.findOne({ title: movie });
+    }
+    
     if (!existingMovie) {
       return res.status(404).json({
         success: false,
@@ -40,66 +52,75 @@ export const createBooking = async (req, res) => {
       }
     });
 
-    // Check for double booking conflicts
-    const existingBookings = await Booking.find({
-      movie,
-      theatre,
-      showTime,
-      bookingDate: new Date(bookingDate),
-      bookingStatus: "confirmed"
-    });
+    // Start transaction
+    await session.withTransaction(async () => {
+      // Check for double booking conflicts within transaction
+      const existingBookings = await Booking.find({
+        movie,
+        theatre,
+        showTime,
+        bookingDate: new Date(bookingDate),
+        bookingStatus: "confirmed"
+      }).session(session);
 
-    const alreadyBookedSeats = existingBookings.flatMap(b => b.seats);
+      const alreadyBookedSeats = existingBookings.flatMap(b => b.seats);
 
-    const conflictSeats = seats.filter(seat =>
-      alreadyBookedSeats.includes(seat)
-    );
+      const conflictSeats = seats.filter(seat =>
+        alreadyBookedSeats.includes(seat)
+      );
 
-    if (conflictSeats.length > 0) {
-      return res.status(400).json({
-        success: false,
-        error: `Seats already booked: ${conflictSeats.join(", ")}`
+      if (conflictSeats.length > 0) {
+        throw new Error(`Seats already booked: ${conflictSeats.join(", ")}`);
+      }
+
+      // Create booking within transaction
+      const booking = new Booking({
+        user: req.user._id,
+        movie: existingMovie._id, // Use actual movie ID from found movie
+        theatre,
+        bookingDate: new Date(bookingDate),
+        showTime,
+        seats,
+        totalPrice,
+        bookingStatus: 'confirmed'
       });
-    }
 
-    // Create booking
-    const booking = new Booking({
-      user: req.user._id,
-      movie,
-      theatre,
-      bookingDate: new Date(bookingDate),
-      showTime,
-      seats,
-      totalPrice,
-      bookingStatus: 'confirmed'
-    });
+      await booking.save({ session });
 
-    await booking.save();
+      // Emit socket event (outside transaction but after successful save)
+      try {
+        io.emit("seatBooked", {
+          seatIds: seats
+        });
+      } catch (err) {
+        console.error("Socket emit error:", err);
+      }
 
-try {
-  io.emit("seatBooked", {
-    seats,
-    movieId: movie,
-    theatre,
-    showTime,
-    bookingDate
-  });
-} catch (err) {
-  console.error("Socket emit error:", err);
-}
-
-    res.status(201).json({
-      success: true,
-      data: booking,
-      message: "Booking created successfully"
+      res.status(201).json({
+        success: true,
+        data: booking,
+        message: "Booking created successfully"
+      });
     });
 
   } catch (error) {
     console.error('Create booking error:', error);
+    
+    // Handle transaction errors
+    if (error.message.includes('Seats already booked')) {
+      return res.status(400).json({
+        success: false,
+        error: error.message
+      });
+    }
+    
     res.status(500).json({
       success: false,
       error: 'Server error while creating booking'
     });
+  } finally {
+    // Always end session
+    await session.endSession();
   }
 };
 
@@ -228,10 +249,14 @@ export const getOccupiedSeats = async (req, res) => {
       return seats.concat(booking.seats);
     }, []);
 
-    // Add currently locked seats from memory store
+    // Add currently locked seats from MongoDB collection
+    const activeLocks = await SeatLock.find({
+      expiresAt: { $gt: new Date() }
+    });
+
     const lockedSeats = [];
-    Object.keys(seatLocks).forEach(lockKey => {
-      const [keyMovieId, keyTheatre, keyShowTime, keyDate, seat] = lockKey.split('_');
+    activeLocks.forEach(lock => {
+      const [keyMovieId, keyTheatre, keyShowTime, keyDate, seat] = lock.key.split('_');
       if (
         keyMovieId === movieId &&
         keyTheatre === theatre &&
@@ -251,10 +276,10 @@ export const getOccupiedSeats = async (req, res) => {
     });
 
   } catch (error) {
-    console.error("Get occupied seats error:", error);
+    console.error('Get occupied seats error:', error);
     res.status(500).json({
       success: false,
-      error: "Failed to fetch occupied seats"
+      error: 'Server error while fetching occupied seats'
     });
   }
 };

@@ -1,0 +1,3 @@
+// DEPRECATED: This file is no longer used
+// The chatbot now uses ONLY Dialogflow webhook (no API calls)
+// See chatbot.js for current webhook implementation

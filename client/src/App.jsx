@@ -70,6 +70,7 @@ function App() {
 
                 <Route path="/movies" element={<Movies />} />
                 <Route path="/movies/:id" element={<MovieDetails />} />
+                <Route path="/movie/:id" element={<MovieDetails />} />
                 <Route path="/book/:id" element={
                   <ProtectedRoute>
                     <SeatSelection />

@@ -3,92 +3,18 @@ import Booking from '../models/Booking.js';
 import Movie from '../models/Movie.js';
 import mongoose from 'mongoose';
 
-// Helper function to get user preferences
-const getUserPreferences = async (userId) => {
-  try {
-    const user = await User.findById(userId);
-    
-    if (!user) {
-      return {
-        preferredGenres: [],
-        preferredLanguages: []
-      };
-    }
-
-    return {
-      preferredGenres: user.preferredGenres || [],
-      preferredLanguages: user.preferredLanguages || []
-    };
-  } catch (error) {
-    console.error('Error fetching user preferences:', error);
-    return {
-      preferredGenres: [],
-      preferredLanguages: []
-    };
-  }
-};
-
-// Helper function to get user booking history
-const getUserHistory = async (userId) => {
-  try {
-    const bookings = await Booking.find({ user: userId })
-      .populate('movie', 'genre language title')
-      .sort({ createdAt: -1 })
-      .limit(20);
-
-    return bookings.map(booking => booking.movie);
-  } catch (error) {
-    console.error('Error fetching user history:', error);
-    return [];
-  }
-};
-
-// Helper function to get user's booked movie IDs
-const getUserBookedMovieIds = async (userId) => {
-  try {
-    const bookings = await Booking.find({ userId }).populate("movieId");
-    const bookedMovieIds = bookings.map(b => b.movieId._id.toString());
-    return bookedMovieIds;
-  } catch (error) {
-    console.error('Error fetching booked movie IDs:', error);
-    return [];
-  }
-};
-
-// Helper function to get trending scores (booking count for each movie)
-const getTrendingScores = async () => {
-  try {
-    const bookingCounts = await Booking.aggregate([
-      { $match: { bookingStatus: 'confirmed' } },
-      { $group: { _id: '$movie', count: { $sum: 1 } } },
-      { $sort: { count: -1 } }
-    ]);
-
-    // Convert to Map for easy lookup
-    const trendingMap = new Map();
-    bookingCounts.forEach(item => {
-      trendingMap.set(item._id.toString(), item.count);
-    });
-
-    return trendingMap;
-  } catch (error) {
-    console.error('Error fetching trending scores:', error);
-    return new Map();
-  }
-};
-
-// Helper function to calculate recommendation score
+// Helper function to calculate score (still used by seat recommendations)
 const calculateScore = (movie, userPreferences, userHistory, trendingScores) => {
   let score = 0;
 
-  // +3 if movie genre matches user preferredGenres
+  // +3 if movie genre matches user genres
   const genreMatches = movie.genre.filter(genre => 
-    userPreferences.preferredGenres.includes(genre)
+    userPreferences.genres.includes(genre)
   );
   score += genreMatches.length * 3;
 
-  // +2 if movie language matches preferredLanguages
-  if (userPreferences.preferredLanguages.includes(movie.language)) {
+  // +2 if movie language matches languages
+  if (userPreferences.languages.includes(movie.language)) {
     score += 2;
   }
 
@@ -101,62 +27,11 @@ const calculateScore = (movie, userPreferences, userHistory, trendingScores) => 
   );
   score += genreSimilarities.length * 1;
 
-  // +1 for trending score (booking count)
+  // +1 for trending score (booking count) - capped at 5
   const trendingScore = trendingScores.get(movie._id.toString()) || 0;
-  score += trendingScore * 1;
+  score += Math.min(trendingScore, 5);
 
   return score;
-};
-
-// Main function to get recommendations
-export const getRecommendations = async (userId) => {
-  try {
-    // 1. Fetch user preferences
-    const preferences = await getUserPreferences(userId);
-
-    // 2. Fetch user booking history
-    const history = await getUserHistory(userId);
-
-    // 3. Fetch the user's bookings using correct field names
-    const bookings = await Booking.find({ user: userId });
-
-    // 4. Extract booked movie IDs correctly
-    const bookedMovieIds = bookings
-      .map(b => b.movie?.toString())
-      .filter(Boolean);
-
-    // 5. Debug log
-    console.log("Booked movie IDs:", bookedMovieIds);
-
-    // 6. Exclude those movies when fetching movies
-    const movies = await Movie.find({
-      _id: { $nin: bookedMovieIds }
-    });
-
-    // 7. Fetch trending scores
-    const trendingScores = await getTrendingScores();
-
-    // 8. Run the recommendation scoring only on the filtered movie list
-    const scoredMovies = movies.map(movie => {
-      const score = calculateScore(movie, preferences, history, trendingScores);
-      return {
-        ...movie.toObject(),
-        recommendationScore: score
-      };
-    });
-
-    // 9. Sort by recommendationScore descending and return top 5
-    const sortedMovies = scoredMovies.sort((a, b) => 
-      b.recommendationScore - a.recommendationScore
-    );
-
-    // 10. Return top 5 recommended movies
-    return sortedMovies.slice(0, 5);
-
-  } catch (error) {
-    console.error('Error generating recommendations:', error);
-    return [];
-  }
 };
 
 // New function for theatre recommendations

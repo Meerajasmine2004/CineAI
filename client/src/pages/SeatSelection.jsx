@@ -19,6 +19,11 @@ const SeatSelection = () => {
   const { id } = useParams();
   const navigate = useNavigate();
 
+  // Get current user
+  const storedUser = localStorage.getItem("user");
+  const user = storedUser && storedUser !== "undefined" && storedUser !== "null" ? JSON.parse(storedUser) : null;
+  const currentUserId = user?._id;
+
   const [movie, setMovie] = useState(null);
   const [loading, setLoading] = useState(true);
   const [bookingLoading, setBookingLoading] = useState(false);
@@ -32,6 +37,7 @@ const SeatSelection = () => {
 
   const [bookedSeats, setBookedSeats] = useState([]);
   const [lockedSeats, setLockedSeats] = useState({});
+  const [seats, setSeats] = useState([]);
   const [recommendedSeats, setRecommendedSeats] = useState([]);
   const [aiRecommendedSeats, setAiRecommendedSeats] = useState([]);
   const [aiTheatre, setAiTheatre] = useState(null);
@@ -42,6 +48,25 @@ const SeatSelection = () => {
 
   const rows = ["A","B","C","D","E","F","G","H","I","J"];
   const seatsPerRow = 14;
+
+  // Initialize seats state
+  useEffect(() => {
+    const initialSeats = [];
+    rows.forEach(row => {
+      for (let i = 1; i <= seatsPerRow; i++) {
+        initialSeats.push({
+          id: `${row}${i}`,
+          row: row,
+          number: i,
+          isLocked: false,
+          isBooked: false,
+          isSelected: false,
+          lockedBy: null
+        });
+      }
+    });
+    setSeats(initialSeats);
+  }, []);
 
   const showTimes = [
     "10:00 AM",
@@ -71,14 +96,33 @@ const SeatSelection = () => {
       console.log("Socket connected with ID:", newSocket.id);
     });
 
-    // Listen for locked seats
-    newSocket.on("seatLocked", ({ movieId, showTime, seat, lockedBy }) => {
-      if (movieId === id && showTime === selectedShowTime) {
-        setLockedSeats(prev => ({
-          ...prev,
-          [seat]: lockedBy
-        }));
-      }
+    // Listen for seat updates
+    newSocket.on("seatUpdate", ({ seatId, lockedBy }) => {
+      console.log("Seat update:", seatId, "locked by:", lockedBy);
+      console.log("Current user:", currentUserId);
+      
+      // Update seat state with lock information
+      setSeats(prevSeats =>
+        prevSeats.map(seat =>
+          seat.id === seatId
+            ? { ...seat, isLocked: true, lockedBy }
+            : seat
+        )
+      );
+    });
+
+    // Listen for seat booked events
+    newSocket.on("seatBooked", ({ seatIds }) => {
+      console.log("Seats booked:", seatIds);
+      
+      // Update seat state for booked seats
+      setSeats(prevSeats =>
+        prevSeats.map(seat =>
+          seatIds.includes(seat.id)
+            ? { ...seat, isBooked: true, isLocked: false }
+            : seat
+        )
+      );
     });
 
     // Listen for unlocked seats
@@ -97,8 +141,39 @@ const SeatSelection = () => {
       toast.error(`Seat ${seat} is already locked by another user`);
     });
 
+    // Listen for seat booked events
+    newSocket.on("seatBooked", ({ seats: bookedSeats, movieId, theatre, showTime, bookingDate }) => {
+      console.log("Seats booked:", bookedSeats);
+      
+      // Update booked seats state if this is for the current movie/showtime
+      if (movieId === id && showTime === selectedShowTime && theatre === selectedTheatre && bookingDate === bookingDate) {
+        setBookedSeats(prev => [...prev, ...bookedSeats]);
+        
+        // Remove from locked seats since they're now booked
+        setLockedSeats(prev => {
+          const updated = { ...prev };
+          bookedSeats.forEach(seat => {
+            delete updated[seat];
+          });
+          return updated;
+        });
+        
+        // Remove from selected seats if user had them selected
+        setSelectedSeats(prev => prev.filter(seat => !bookedSeats.includes(seat)));
+        
+        toast.success(`Seats ${bookedSeats.join(', ')} have been booked`);
+      }
+    });
+
     // Cleanup: unlock all seats when component unmounts
     return () => {
+      // Remove all event listeners
+      newSocket.off("connect");
+      newSocket.off("seatUpdate");
+      newSocket.off("seatBooked");
+      newSocket.off("seatUnlocked");
+      newSocket.off("seatAlreadyLocked");
+      
       // Unlock all selected seats
       selectedSeats.forEach(seat => {
         newSocket.emit("unlockSeat", {
@@ -208,8 +283,12 @@ const SeatSelection = () => {
       return;
     }
 
-    if (lockedSeats[seat] && !selectedSeats.includes(seat)) {
-      toast.error("Seat locked by another user");
+    // Check if seat is locked by another user (only block others)
+    const lockedBy = lockedSeats[seat];
+    if (lockedBy && lockedBy !== currentUserId && !selectedSeats.includes(seat)) {
+      console.log("Seat locked by:", lockedBy);
+      console.log("Current user:", currentUserId);
+      toast.error("Seat already locked by another user");
       return;
     }
 
@@ -227,7 +306,9 @@ const SeatSelection = () => {
         return;
       }
 
-      if (bookedSeats.includes(nextSeat) || lockedSeats[nextSeat]) {
+      // Check if adjacent seat is booked or locked by another user
+      const adjacentLockedBy = lockedSeats[nextSeat];
+      if (bookedSeats.includes(nextSeat) || (adjacentLockedBy && adjacentLockedBy !== currentUserId)) {
         toast.error("Adjacent seats not available");
         return;
       }
@@ -256,7 +337,8 @@ const SeatSelection = () => {
         theatre: selectedTheatre,
         showTime: selectedShowTime,
         bookingDate,
-        seat: s
+        seat: s,
+        userId: currentUserId
       });
     });
 
@@ -286,28 +368,28 @@ const SeatSelection = () => {
     return "vip";                                           // ₹350 (F-J)
   };
 
-  const getSeatClass = (seat, row) => {
-    // BOOKED seats (RED)
-    if (bookedSeats.includes(seat))
+  const getSeatClass = (seat) => {
+    // BOOKED seats (RED) - Highest priority
+    if (seat.isBooked)
       return "bg-red-600 text-white cursor-not-allowed";
 
-    // LOCKED seats (YELLOW)
-    if (lockedSeats[seat] && !selectedSeats.includes(seat))
-      return "bg-yellow-500 text-black cursor-not-allowed";
+    // LOCKED seats (YELLOW) - All locked seats same color
+    if (seat.isLocked && seat.lockedBy !== currentUserId)
+      return "bg-yellow-400 text-black cursor-not-allowed";
 
     // SELECTED seats (GREEN)
-    if (selectedSeats.includes(seat))
+    if (selectedSeats.includes(seat.id))
       return "bg-green-600 text-white";
 
     // AI RECOMMENDED seats (PURPLE)
-    if (recommendedSeats.includes(seat))
+    if (recommendedSeats.includes(seat.id))
       return "bg-purple-600 text-white ring-2 ring-purple-300 scale-110";
 
-    // Seat category styles
-    if (["A","B","C"].includes(row))
+    // Seat category styles based on row
+    if (["A","B","C"].includes(seat.row))
       return "border border-gray-500 text-gray-300 hover:bg-gray-700";
 
-    if (["D","E","F"].includes(row))
+    if (["D","E","F"].includes(seat.row))
       return "border border-blue-500 text-blue-300 hover:bg-blue-700";
 
     return "border border-yellow-400 text-yellow-300 hover:bg-yellow-700";
@@ -551,30 +633,28 @@ const SeatSelection = () => {
 
                   <span className="w-4">{row}</span>
 
-                  {Array.from({length:seatsPerRow},(_,i)=>{
+                  {seats
+                    .filter(seat => seat.row === row)
+                    .map(seat => {
+                      const aisleGap = seat.number === 8 ? "ml-6" : ""
+                      
+                      return(
+                        <button
+                          key={seat.id}
+                          onClick={() => handleSeatClick(seat.id)}
+                          className={`relative w-10 h-10 rounded text-sm ${getSeatClass(seat)} ${aisleGap}`}
+                        >
+                          {seat.number}
 
-                    const num=i+1
-                    const seat=`${row}${num}`
-                    const aisleGap=num===8?"ml-6":""
+                          {recommendedSeats.includes(seat.id)&&(
+                            <span className="absolute -top-1 -right-1 text-yellow-300 text-xs">
+                              ✨
+                            </span>
+                          )}
 
-                    return(
-                      <button
-                        key={seat}
-                        onClick={()=>handleSeatClick(seat)}
-                        className={`relative w-10 h-10 rounded text-sm ${getSeatClass(seat,row)} ${aisleGap}`}
-                      >
-                        {num}
-
-                        {recommendedSeats.includes(seat)&&(
-                          <span className="absolute -top-1 -right-1 text-yellow-300 text-xs">
-                            ✨
-                          </span>
-                        )}
-
-                      </button>
-                    )
-
-                  })}
+                        </button>
+                      )
+                    })}
 
                 </div>
               ))}
@@ -604,7 +684,7 @@ const SeatSelection = () => {
               </div>
               <div className="flex items-center gap-2">
                 <div className="w-6 h-6 rounded" style={{backgroundColor: '#a855f7'}}></div>
-                <span className="text-sm">AI Recommended ✨</span>
+                <span className="text-sm">AI Recommended</span>
               </div>
             </div>
 
